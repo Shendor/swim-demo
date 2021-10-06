@@ -10,7 +10,9 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 pub enum Message {
-    DATA(String),
+    DATA(String, Arc<Mutex<DefaultMemberNode>>),
+    RESPONSE(String),
+    JOIN(Arc<Mutex<DefaultMemberNode>>),
     PING(u16),
     SHUTDOWN(),
 }
@@ -35,7 +37,7 @@ impl MemberNode for DefaultMemberNode {
     }
 
     fn shut_down(&self) {
-        self.send(Message::SHUTDOWN());
+        // self.send(Message::SHUTDOWN());
         println!("Node {} is shutting down", self.details.id);
     }
 }
@@ -43,17 +45,26 @@ impl MemberNode for DefaultMemberNode {
 impl DefaultMemberNode {
     pub fn new(id: u16) -> Self {
         let (sender, receiver): (Sender<Message>, Receiver<Message>) = mpsc::channel();
+        let mut members = vec!();
         let listener = thread::spawn(move || {
             println!("Node {} started to listen requests", &id);
             let mut is_terminated = false;
             while is_terminated.not() {
                 match receiver.recv().unwrap() {
-                    Message::DATA(d) => println!("Node {} received message: {}", id, d),
+                    Message::DATA(d, from) => {
+                        println!("Node {} received message: {}", id, d);
+                        members.push(Arc::clone(&from));
+                        from.lock().unwrap().send(Message::RESPONSE(String::from("hi")));
+                    }
+                    Message::JOIN(n) => {
+                        members.push(Arc::clone(&n))
+                    }
                     Message::PING(from) => println!("Node {} received ping request from Node {}", id, from),
                     Message::SHUTDOWN() => {
                         println!("Node {} received termination message", id);
                         is_terminated = true
                     }
+                    Message::RESPONSE(r) => { println!("Node {} received response: {}", id, r) }
                 }
             }
         });
@@ -63,6 +74,14 @@ impl DefaultMemberNode {
             sender,
             listener,
         }
+    }
+
+    pub fn send2(&self, message: Message, from: Arc<Mutex<DefaultMemberNode>>) {
+        println!("Node {} sent message", from.lock().unwrap().details.id);
+    }
+
+    pub fn get_details(self) -> MemberNodeDetails {
+        self.details
     }
 }
 
@@ -97,10 +116,15 @@ pub struct MemberNodes {
 }
 
 impl MemberNodes {
-    pub fn new(node: MemberNodeDetails) -> Self {
+
+    pub fn new() -> Self {
         MemberNodes {
-            members: vec!(node)
+            members: vec!()
         }
+    }
+
+    pub fn add(&mut self, node: MemberNodeDetails) {
+        self.members.push(node);
     }
 
     pub fn get_random_node(&self) -> Option<&MemberNodeDetails> {

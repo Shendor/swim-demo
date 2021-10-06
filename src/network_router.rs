@@ -14,7 +14,7 @@ pub trait NodeRequestRouter {
     fn shut_down(&self);
 }
 
-type Routes = HashMap<u16, DefaultMemberNode>;
+type Routes = HashMap<u16, Arc<Mutex<DefaultMemberNode>>>;
 
 pub struct DefaultNodeRequestRouter {
     routes: Routes,
@@ -32,13 +32,16 @@ impl NodeRequestRouter for DefaultNodeRequestRouter {
             self.add_node(from)
         }
         let node = self.routes.get(&to).unwrap();
+        let from_node = self.routes.get(&from).unwrap();
+        // let from_node_arc = Arc::new(Mutex::new(DefaultMemberNode::new(12)));
         // node.unwrap().borrow().send(Message::DATA(String::from("hello from " + from.to_string())));
-        node.send(Message::DATA(format!("hello from {}", from)));
+        node.lock().unwrap().send(Message::DATA(format!("hello from {}", from), Arc::clone(from_node)));
+        // node.lock().unwrap().send(Message::JOIN(Arc::clone(from_node)));
     }
 
     fn shut_down(&self) {
         for node in self.routes.values() {
-            node.shut_down()
+            node.lock().unwrap().shut_down()
         }
     }
 }
@@ -52,7 +55,7 @@ impl DefaultNodeRequestRouter {
 
     fn add_node(&mut self, id: u16) {
         let node = DefaultMemberNode::new(id);
-        self.routes.insert(id, node);
+        self.routes.insert(id, Arc::new(Mutex::new(node)));
         println!("Node {} has been added", id);
     }
 }
