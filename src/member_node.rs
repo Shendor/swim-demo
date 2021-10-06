@@ -18,7 +18,7 @@ pub enum Message {
 pub trait MemberNode {
     fn send(&self, message: Message);
 
-    fn shut_down(&mut self);
+    fn shut_down(&self);
 }
 
 pub struct DefaultMemberNode {
@@ -34,7 +34,7 @@ impl MemberNode for DefaultMemberNode {
         self.sender.send(message).unwrap();
     }
 
-    fn shut_down(&mut self) {
+    fn shut_down(&self) {
         self.send(Message::SHUTDOWN());
         println!("Node {} is shutting down", self.details.id);
     }
@@ -61,7 +61,7 @@ impl DefaultMemberNode {
         DefaultMemberNode {
             details: MemberNodeDetails::new(id),
             sender,
-            listener
+            listener,
         }
     }
 }

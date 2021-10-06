@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap};
 use std::ops::Not;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Receiver, Sender};
 use crate::member_node::{MemberNode, Message, DefaultMemberNode};
 
@@ -13,7 +14,7 @@ pub trait NodeRequestRouter {
     fn shut_down(&self);
 }
 
-type Routes = HashMap<u16, Rc<RefCell<dyn MemberNode>>>;
+type Routes = HashMap<u16, DefaultMemberNode>;
 
 pub struct DefaultNodeRequestRouter {
     routes: Routes,
@@ -30,14 +31,14 @@ impl NodeRequestRouter for DefaultNodeRequestRouter {
         if self.routes.contains_key(&from).not() {
             self.add_node(from)
         }
-        let node = self.routes.get(&to);
+        let node = self.routes.get(&to).unwrap();
         // node.unwrap().borrow().send(Message::DATA(String::from("hello from " + from.to_string())));
-        node.unwrap().borrow().send(Message::DATA(format!("hello from {}", from)));
+        node.send(Message::DATA(format!("hello from {}", from)));
     }
 
     fn shut_down(&self) {
         for node in self.routes.values() {
-            node.borrow_mut().shut_down()
+            node.shut_down()
         }
     }
 }
@@ -51,7 +52,7 @@ impl DefaultNodeRequestRouter {
 
     fn add_node(&mut self, id: u16) {
         let node = DefaultMemberNode::new(id);
-        self.routes.insert(id, Rc::new(RefCell::new(node)));
+        self.routes.insert(id, node);
         println!("Node {} has been added", id);
     }
 }
