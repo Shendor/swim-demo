@@ -11,9 +11,9 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 pub enum Message {
-    DATA(String, Arc<Mutex<DefaultMemberNode>>),
-    RESPONSE(Arc<Mutex<DefaultMemberNode>>, String),
-    PING(Arc<Mutex<DefaultMemberNode>>),
+    DATA(String, (MemberNodeDetails, Arc<Mutex<Sender<Message>>>)),
+    RESPONSE((MemberNodeDetails, Arc<Mutex<Sender<Message>>>), String),
+    PING((MemberNodeDetails, Arc<Mutex<Sender<Message>>>)),
     PING_RESPONSE(u16, bool),
     SHUTDOWN(),
 }
@@ -26,14 +26,14 @@ pub trait MemberNode {
 
 pub struct DefaultMemberNode {
     details: MemberNodeDetails,
-    members: Arc<Mutex<MemberNodesRegistry>>,
-    sender: Sender<Message>,
+    members: MemberNodesRegistry2,
+    sender: Arc<Mutex<Sender<Message>>>,
     is_terminated: bool,
 }
 
 impl MemberNode for DefaultMemberNode {
     fn send(&self, message: Message) {
-        self.sender.send(message).unwrap();
+        self.sender.lock().unwrap().send(message).unwrap();
     }
 
     fn shut_down(&self) {
@@ -45,12 +45,12 @@ impl MemberNode for DefaultMemberNode {
 impl DefaultMemberNode {
     pub fn new(id: u16) -> Arc<Mutex<DefaultMemberNode>> {
         let (sender, receiver): (Sender<Message>, Receiver<Message>) = mpsc::channel();
-
+        let sender_ref = Arc::new(Mutex::new(sender));
         let node = Arc::new(Mutex::new(
             DefaultMemberNode {
                 details: MemberNodeDetails::new(id),
-                members: Arc::new(Mutex::new(MemberNodesRegistry::new())),
-                sender,
+                members: MemberNodesRegistry2::new(),
+                sender : sender_ref,
                 is_terminated: false,
             }));
         let node_ref = Arc::clone(&node);
@@ -63,27 +63,27 @@ impl DefaultMemberNode {
                     Message::DATA(d, from) => {
                         println!("Node {} received message: {}", id, d);
 
-                        let node = node_ref.lock().unwrap();
-                        node.members.lock().unwrap().add(Arc::clone(&from));
+                        let mut node = node_ref.lock().unwrap();
+                        let details = node.details;
+                        let connection =  Arc::clone(&node.sender);
+                        node.members.add((from.0, Arc::clone(&from.1)));
 
-                        let from_node = from.lock().unwrap();
-                        // from_node.members.lock().unwrap().add(Arc::clone(&node_ref));
-
-                        from_node.send(Message::RESPONSE(Arc::clone(&node_ref), String::from("hi")));
+                        from.1.lock().unwrap().send(Message::RESPONSE((details, connection), String::from("hi")));
                     }
                     Message::RESPONSE(from, data) => {
-                        let node = node_ref.lock().unwrap();
-                        node.members.lock().unwrap().add(Arc::clone(&from));
-                        println!("Node {} received response from Node {}: {}", id, from.lock().unwrap().details.id, data)
+                        let mut node = node_ref.lock().unwrap();
+                        let from_details = from.0;
+                        node.members.add(from);
+                        println!("Node {} received response from Node {}: {}", id, from_details.id, data)
                     }
                     Message::PING(from) => {
-                        let from_node = from.lock().unwrap();
-                        println!("Node {} received ping request from Node {}", &id, from_node.details.id);
-                        from_node.send(Message::PING_RESPONSE(id, false))
+                        // let from_node = from.lock().unwrap();
+                        println!("Node {} received ping request from Node {}", &id, from.0.id);
+                        from.1.lock().unwrap().send(Message::PING_RESPONSE(id, false));
                     }
                     Message::PING_RESPONSE(from, is_timed_out) => {
                         println!("Node {} received ping response from Node {}", &id, from);
-                        node_ref.lock().unwrap().members.lock().unwrap().set_node_state(from, if is_timed_out { MemberNodeState::SUSPECTED } else { MemberNodeState::ALIVE })
+                        // node_ref.lock().unwrap().members.lock().unwrap().set_node_state(from, if is_timed_out { MemberNodeState::SUSPECTED } else { MemberNodeState::ALIVE })
                     }
                     Message::SHUTDOWN() => {
                         println!("Node {} received termination message", &id);
@@ -95,40 +95,42 @@ impl DefaultMemberNode {
             }
         });
 
-        if id == 1 {
+        // if id == 1 {
             thread::spawn(move || {
                 loop {
                     thread::sleep(Duration::from_secs(1));
-                    match node_ref_2.lock().unwrap().members.lock().unwrap().get_random_node() {
+                    let node = node_ref_2.lock().unwrap();
+                    match node.members.get_random_node() {
                         Some(n) => {
-                            println!("got random node");
-
-                            // println!("Random node {} received", guard.details.id);
-                            n.lock().unwrap().send(Message::PING(Arc::clone(&node_ref_2)));
+                            println!("Random node {} received", n.0.id);
+                            n.1.lock().unwrap().send(Message::PING((node.details, Arc::clone(&node.sender))));
                         }
                         None => {
                             println!("no members found");
                         }
                     }
-
                     // if node.is_terminated { break; }
                 }
             });
-        }
+        // }
         node
     }
 
-    pub fn add_member_node(&mut self, node: Arc<Mutex<DefaultMemberNode>>) {
-        self.members.lock().unwrap().add(node);
+    pub fn add_member_node(&mut self, node: (MemberNodeDetails, Arc<Mutex<Sender<Message>>>)) {
+        self.members.add(node);
     }
-}
 
+    pub fn details(&self) -> MemberNodeDetails { self.details }
+
+    pub fn connection(&self) -> Arc<Mutex<Sender<Message>>> { Arc::clone(&self.sender) }
+}
+#[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq, Copy)]
 pub enum MemberNodeState {
     ALIVE,
     SUSPECTED,
     FAILED,
 }
-
+#[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq, Copy)]
 pub struct MemberNodeDetails {
     id: u16,
     state: MemberNodeState,
@@ -147,6 +149,45 @@ impl MemberNodeDetails {
     pub fn name(&self) -> String { format!("node-{}", self.id) }
 
     pub fn state(&self) -> &MemberNodeState { &self.state }
+
+    pub fn change_state(&mut self, state : MemberNodeState)  { self.state = state }
+}
+
+pub struct MemberNodesRegistry2 {
+    members: Vec<(MemberNodeDetails, Arc<Mutex<Sender<Message>>>)>,
+}
+
+impl MemberNodesRegistry2 {
+    pub fn new() -> Self {
+        MemberNodesRegistry2 {
+            members: vec!()
+        }
+    }
+
+    pub fn add(&mut self, node: (MemberNodeDetails, Arc<Mutex<Sender<Message>>>)) {
+        self.members.push(node);
+    }
+
+    pub fn set_node_state(&mut self, id: u16, state: MemberNodeState) {
+        match self.members.iter_mut().find(|ref i| { i.0.id == id }) {
+            Some(mut n) => { n.0.change_state(state) }
+            _ => {}
+        }
+    }
+
+    pub fn get_random_node(&self) -> Option<&(MemberNodeDetails, Arc<Mutex<Sender<Message>>>)> {
+        if self.is_empty() {
+            None
+        } else {
+            let random_index = thread_rng().gen_range(0..self.members.len());
+            let random_node = &self.members[random_index];
+            Some(random_node)
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.members.is_empty()
+    }
 }
 
 pub struct MemberNodesRegistry {
