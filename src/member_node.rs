@@ -28,12 +28,13 @@ pub trait MemberNode {
 pub struct DefaultMemberNode {
     details: MemberNodeDetails,
     members: Arc<Mutex<MemberNodesRegistry>>,
-    sender: Arc<Mutex<Sender<Message>>>,
+    sender: Sender<Message>,
+    is_terminated: bool
 }
 
 impl MemberNode for DefaultMemberNode {
     fn send(&self, message: Message) {
-        self.sender.lock().unwrap().send(message).unwrap();
+        self.sender.send(message).unwrap();
     }
 
     fn shut_down(&self) {
@@ -47,15 +48,14 @@ impl DefaultMemberNode {
         let (sender, receiver): (Sender<Message>, Receiver<Message>) = mpsc::channel();
 
         let members = Arc::new(Mutex::new(MemberNodesRegistry::new()));
-        let members_read = Arc::clone(&members);
-        let members_field = Arc::clone(&members);
+        let members_ref = Arc::clone(&members);
 
-        let mut is_terminated = Arc::new(Mutex::new(false));
-        let is_echo_terminated = Arc::clone(&is_terminated);
+        let is_terminated = false;
+        let mut is_terminated_ref = Arc::new(Mutex::new(is_terminated));
 
         thread::spawn(move || {
             println!("Node {} started to listen requests", &id);
-            while is_terminated.lock().unwrap().not() {
+            while is_terminated_ref.lock().unwrap().not() {
                 match receiver.recv().unwrap() {
                     Message::DATA(d, from) => {
                         println!("Node {} received message: {}", id, d);
@@ -80,7 +80,7 @@ impl DefaultMemberNode {
                     }
                     Message::SHUTDOWN() => {
                         println!("Node {} received termination message", &id);
-                        *is_terminated.lock().unwrap() = true;
+                        *is_terminated_ref.lock().unwrap() = true;
                     }
                 }
             }
@@ -88,8 +88,9 @@ impl DefaultMemberNode {
 
         DefaultMemberNode {
             details: MemberNodeDetails::new(id),
-            members: members_field,
-            sender: Arc::new(Mutex::new(sender)),
+            members: members_ref,
+            sender,
+            is_terminated,
         }
     }
 
@@ -99,8 +100,7 @@ impl DefaultMemberNode {
 
     pub fn run_echo(this: Arc<Mutex<Self>>) {
         thread::spawn(move || {
-            // while is_echo_terminated.lock().unwrap().not() {
-            loop {
+            while this.lock().unwrap().is_terminated.not() {
                 thread::sleep(Duration::from_secs(3));
                 match this.lock().unwrap().members.lock().unwrap().get_random_node() {
                     Some(n) => {
