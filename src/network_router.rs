@@ -35,7 +35,8 @@ impl NodeRequestRouter for DefaultNodeRequestRouter {
         let from_node = self.routes.get(&from).unwrap();
         // let from_node_arc = Arc::new(Mutex::new(DefaultMemberNode::new(12)));
         // node.unwrap().borrow().send(Message::DATA(String::from("hello from " + from.to_string())));
-        node.lock().unwrap().send(Message::DATA(format!("hello from {}", from), Arc::clone(from_node)));
+        let guard = node.lock().unwrap();
+        guard.send(Message::DATA(format!("hello from {}", from), Arc::clone(from_node)));
         // node.lock().unwrap().send(Message::JOIN(Arc::clone(from_node)));
     }
 
@@ -55,10 +56,10 @@ impl DefaultNodeRequestRouter {
 
     fn add_node(&mut self, id: u16) {
         let node = DefaultMemberNode::new(id);
-        let node_ref = Arc::new(Mutex::new(node));
-        self.routes.insert(id, Arc::clone(&node_ref));
+        // let node_ref = Arc::new(Mutex::new(node));
+        self.routes.insert(id, node);
 
-        DefaultMemberNode::run_echo(node_ref);
+        // DefaultMemberNode::run_echo(node_ref);
         println!("Node {} has been added", id);
     }
 }
