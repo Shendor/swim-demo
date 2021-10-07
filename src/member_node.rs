@@ -50,7 +50,7 @@ impl DefaultMemberNode {
             DefaultMemberNode {
                 details: MemberNodeDetails::new(id),
                 members: MemberNodesRegistry2::new(),
-                sender : sender_ref,
+                sender: sender_ref,
                 is_terminated: false,
             }));
         let node_ref = Arc::clone(&node);
@@ -65,7 +65,7 @@ impl DefaultMemberNode {
 
                         let mut node = node_ref.lock().unwrap();
                         let details = node.details;
-                        let connection =  Arc::clone(&node.sender);
+                        let connection = Arc::clone(&node.sender);
                         node.members.add((from.0, Arc::clone(&from.1)));
 
                         from.1.lock().unwrap().send(Message::RESPONSE((details, connection), String::from("hi")));
@@ -95,24 +95,20 @@ impl DefaultMemberNode {
             }
         });
 
-        // if id == 1 {
-            thread::spawn(move || {
-                loop {
-                    thread::sleep(Duration::from_secs(1));
-                    let node = node_ref_2.lock().unwrap();
-                    match node.members.get_random_node() {
-                        Some(n) => {
-                            println!("Random node {} received", n.0.id);
-                            n.1.lock().unwrap().send(Message::PING((node.details, Arc::clone(&node.sender))));
-                        }
-                        None => {
-                            println!("no members found");
-                        }
+        thread::spawn(move || {
+            loop {
+                thread::sleep(Duration::from_secs(1));
+                let node = node_ref_2.lock().unwrap();
+                match node.members.get_random_node() {
+                    Some(n) => {
+                        n.1.lock().unwrap().send(Message::PING((node.details, Arc::clone(&node.sender))));
                     }
-                    // if node.is_terminated { break; }
+                    None => {
+                    }
                 }
-            });
-        // }
+                if node.is_terminated { break; }
+            }
+        });
         node
     }
 
@@ -124,12 +120,14 @@ impl DefaultMemberNode {
 
     pub fn connection(&self) -> Arc<Mutex<Sender<Message>>> { Arc::clone(&self.sender) }
 }
+
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq, Copy)]
 pub enum MemberNodeState {
     ALIVE,
     SUSPECTED,
     FAILED,
 }
+
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq, Copy)]
 pub struct MemberNodeDetails {
     id: u16,
@@ -150,7 +148,7 @@ impl MemberNodeDetails {
 
     pub fn state(&self) -> &MemberNodeState { &self.state }
 
-    pub fn change_state(&mut self, state : MemberNodeState)  { self.state = state }
+    pub fn change_state(&mut self, state: MemberNodeState) { self.state = state }
 }
 
 pub struct MemberNodesRegistry2 {
