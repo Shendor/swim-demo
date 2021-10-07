@@ -3,6 +3,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use rand;
 use rand::{Rng, thread_rng};
 use std::{thread, vec};
+use std::borrow::Borrow;
 use std::rc::Rc;
 use std::sync::{Arc, mpsc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,9 +12,10 @@ use std::time::Duration;
 
 pub enum Message {
     DATA(String, Arc<Mutex<DefaultMemberNode>>),
-    RESPONSE(String),
+    RESPONSE(u16, String),
     JOIN(Arc<Mutex<DefaultMemberNode>>),
-    PING(u16),
+    PING(Arc<Mutex<DefaultMemberNode>>),
+    PING_RESPONSE(u16, bool),
     SHUTDOWN(),
 }
 
@@ -25,19 +27,17 @@ pub trait MemberNode {
 
 pub struct DefaultMemberNode {
     details: MemberNodeDetails,
-    sender: Sender<Message>,
-    // receiver: Arc<Mutex<Receiver<Message>>>,
-    listener: JoinHandle<()>,
+    members: Arc<Mutex<MemberNodesRegistry>>,
+    sender: Arc<Mutex<Sender<Message>>>,
 }
 
 impl MemberNode for DefaultMemberNode {
     fn send(&self, message: Message) {
-        println!("Node {} sent message", self.details.id);
-        self.sender.send(message).unwrap();
+        self.sender.lock().unwrap().send(message).unwrap();
     }
 
     fn shut_down(&self) {
-        // self.send(Message::SHUTDOWN());
+        self.send(Message::SHUTDOWN());
         println!("Node {} is shutting down", self.details.id);
     }
 }
@@ -45,43 +45,71 @@ impl MemberNode for DefaultMemberNode {
 impl DefaultMemberNode {
     pub fn new(id: u16) -> Self {
         let (sender, receiver): (Sender<Message>, Receiver<Message>) = mpsc::channel();
-        let mut members = vec!();
-        let listener = thread::spawn(move || {
+
+        let members = Arc::new(Mutex::new(MemberNodesRegistry::new()));
+        let members_read = Arc::clone(&members);
+        let members_field = Arc::clone(&members);
+
+        let mut is_terminated = Arc::new(Mutex::new(false));
+        let is_echo_terminated = Arc::clone(&is_terminated);
+
+        thread::spawn(move || {
             println!("Node {} started to listen requests", &id);
-            let mut is_terminated = false;
-            while is_terminated.not() {
+            while is_terminated.lock().unwrap().not() {
                 match receiver.recv().unwrap() {
                     Message::DATA(d, from) => {
                         println!("Node {} received message: {}", id, d);
-                        members.push(Arc::clone(&from));
-                        from.lock().unwrap().send(Message::RESPONSE(String::from("hi")));
+                        members.lock().unwrap().add(Arc::clone(&from));
+
+                        let from_node = from.lock().unwrap();
+                        from_node.send(Message::RESPONSE(id, String::from("hi")));
                     }
+                    Message::RESPONSE(from_id, data) => { println!("Node {} received response from Node {}: {}", id, from_id, data) }
                     Message::JOIN(n) => {
-                        members.push(Arc::clone(&n))
+                        members.lock().unwrap().add(Arc::clone(&n))
                     }
-                    Message::PING(from) => println!("Node {} received ping request from Node {}", id, from),
+                    Message::PING(from) => {
+                        let from_node = from.lock().unwrap();
+                        println!("Node {} received ping request from Node {}", &id, from_node.details.id);
+                        from_node.send(Message::PING_RESPONSE(id, false))
+                    }
+                    Message::PING_RESPONSE(from, is_timed_out) => {
+                        println!("Node {} received ping response from Node {}", &id, from);
+                        let mut node = members.lock().unwrap();
+                        node.set_node_state(from, if is_timed_out { MemberNodeState::SUSPECTED } else { MemberNodeState::ALIVE })
+                    }
                     Message::SHUTDOWN() => {
-                        println!("Node {} received termination message", id);
-                        is_terminated = true
+                        println!("Node {} received termination message", &id);
+                        *is_terminated.lock().unwrap() = true;
                     }
-                    Message::RESPONSE(r) => { println!("Node {} received response: {}", id, r) }
                 }
             }
         });
 
         DefaultMemberNode {
             details: MemberNodeDetails::new(id),
-            sender,
-            listener,
+            members: members_field,
+            sender: Arc::new(Mutex::new(sender)),
         }
     }
 
-    pub fn send2(&self, message: Message, from: Arc<Mutex<DefaultMemberNode>>) {
-        println!("Node {} sent message", from.lock().unwrap().details.id);
+    pub fn add_member_node(&mut self, node: Arc<Mutex<DefaultMemberNode>>) {
+        self.members.lock().unwrap().add(node);
     }
 
-    pub fn get_details(self) -> MemberNodeDetails {
-        self.details
+    pub fn run_echo(this: Arc<Mutex<Self>>) {
+        thread::spawn(move || {
+            // while is_echo_terminated.lock().unwrap().not() {
+            loop {
+                thread::sleep(Duration::from_secs(3));
+                match this.lock().unwrap().members.lock().unwrap().get_random_node() {
+                    Some(n) => {
+                        n.lock().unwrap().send(Message::PING(Arc::clone(&this)));
+                    }
+                    None => {}
+                }
+            }
+        });
     }
 }
 
@@ -111,23 +139,29 @@ impl MemberNodeDetails {
     pub fn state(&self) -> &MemberNodeState { &self.state }
 }
 
-pub struct MemberNodes {
-    members: Vec<MemberNodeDetails>,
+pub struct MemberNodesRegistry {
+    members: Vec<Arc<Mutex<DefaultMemberNode>>>,
 }
 
-impl MemberNodes {
-
+impl MemberNodesRegistry {
     pub fn new() -> Self {
-        MemberNodes {
+        MemberNodesRegistry {
             members: vec!()
         }
     }
 
-    pub fn add(&mut self, node: MemberNodeDetails) {
+    pub fn add(&mut self, node: Arc<Mutex<DefaultMemberNode>>) {
         self.members.push(node);
     }
 
-    pub fn get_random_node(&self) -> Option<&MemberNodeDetails> {
+    pub fn set_node_state(&mut self, id: u16, state: MemberNodeState) {
+        match self.members.iter().find(|ref i| { i.lock().unwrap().details.id == id }) {
+            Some(n) => { n.lock().unwrap().details.state = state }
+            _ => {}
+        }
+    }
+
+    pub fn get_random_node(&self) -> Option<&Arc<Mutex<DefaultMemberNode>>> {
         if self.is_empty() {
             None
         } else {

@@ -55,7 +55,10 @@ impl DefaultNodeRequestRouter {
 
     fn add_node(&mut self, id: u16) {
         let node = DefaultMemberNode::new(id);
-        self.routes.insert(id, Arc::new(Mutex::new(node)));
+        let node_ref = Arc::new(Mutex::new(node));
+        self.routes.insert(id, Arc::clone(&node_ref));
+
+        DefaultMemberNode::run_echo(node_ref);
         println!("Node {} has been added", id);
     }
 }
