@@ -38,7 +38,7 @@ impl NodeRequestRouter for DefaultNodeRequestRouter {
         // let from_node_arc = Arc::new(Mutex::new(DefaultMemberNode::new(12)));
         // node.unwrap().borrow().send(Message::DATA(String::from("hello from " + from.to_string())));
         let guard = node.lock().unwrap();
-        guard.send(Message::DATA(format!("hello from {}", from), (details, connection)));
+        guard.send(Message::Request(format!("hello from {}", from), (details, connection)));
         // node.lock().unwrap().send(Message::JOIN(Arc::clone(from_node)));
     }
 
