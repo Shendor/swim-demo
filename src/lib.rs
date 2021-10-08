@@ -1,10 +1,6 @@
 pub mod member_node;
 pub mod network_router;
 
-use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
-use std::thread;
-use crate::member_node::Message;
 use crate::network_router::{DefaultNodeRequestRouter, NodeRequestRouter};
 
 /*

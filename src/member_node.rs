@@ -1,22 +1,21 @@
-use std::ops::{Not, Range};
+use std::{thread, vec};
+use std::ops::Not;
+use std::sync::{Arc, mpsc, Mutex};
 use std::sync::mpsc::{Receiver, Sender};
+use std::time::Duration;
+
 use rand;
 use rand::{Rng, thread_rng};
-use std::{thread, vec};
-use std::borrow::Borrow;
-use std::rc::Rc;
-use std::sync::{Arc, mpsc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread::JoinHandle;
-use std::time::Duration;
 
 pub type MemberNodesRegistryDetails = (MemberNodeDetails, Arc<Mutex<Sender<Message>>>);
 
 pub enum Message {
     Request(String, MemberNodesRegistryDetails),
     Response(MemberNodesRegistryDetails, String),
-    Ping(MemberNodesRegistryDetails),
-    PingResponse(u16, bool),
+    Ping(MemberNodesRegistryDetails, Option<MemberNodesRegistryDetails>),
+    PingResponse(u16, Option<MemberNodesRegistryDetails>, bool),
+    ProbeRequest(MemberNodesRegistryDetails, u16),
+    ProbeResponse(u16, bool),
     Shutdown(),
 }
 
@@ -78,13 +77,47 @@ impl DefaultMemberNode {
                         node.members.add(from);
                         println!("Node {} received response from Node {}: {}", id, from_details.id, data)
                     }
-                    Message::Ping(from) => {
+                    Message::Ping(from, probing_node) => {
                         println!("Node {} received ping request from Node {}", &id, from.0.id);
-                        from.1.lock().unwrap().send(Message::PingResponse(id, false));
+                        from.1.lock().unwrap().send(Message::PingResponse(id, probing_node, false));
                     }
-                    Message::PingResponse(from, is_timed_out) => {
+                    Message::PingResponse(from, probing_node, is_timed_out) => {
                         println!("Node {} received ping response from Node {}", &id, from);
-                        node_ref.lock().unwrap().members.set_node_state(from, if is_timed_out { MemberNodeState::Suspected } else { MemberNodeState::Alive })
+                        match probing_node {
+                            Some(n) => {
+                                n.1.lock().unwrap().send(Message::ProbeResponse(from, is_timed_out));
+                            }
+                            None => {
+                                if is_timed_out {
+                                    let mut node = node_ref.lock().unwrap();
+                                    let details = node.details;
+                                    node.members.set_node_state(from, MemberNodeState::Failed);
+                                    for n in node.members.get_random_nodes(3).iter() {
+                                        n.1.lock().unwrap().send(Message::ProbeRequest((details, Arc::clone(&node.sender)), from));
+                                    }
+                                } else {
+                                    node_ref.lock().unwrap().members.set_node_state(from, MemberNodeState::Alive)
+                                }
+                            }
+                        }
+                    }
+                    Message::ProbeRequest(from, timed_out_node) => {
+                        let node = node_ref.lock().unwrap();
+                        let details = node.details;
+                        let connection = Arc::clone(&node.sender);
+
+                        match node.members.get_by_id(timed_out_node) {
+                            Some(n) => {
+                                n.1.lock().unwrap().send(Message::Ping((details, Arc::clone(&connection)), Option::Some(from)));
+                            }
+                            _ => {}
+                        }
+                    }
+                    Message::ProbeResponse(from, is_timed_out) => {
+                        let mut node = node_ref.lock().unwrap();
+                        if is_timed_out.not() {
+                            node.members.set_node_state(from, MemberNodeState::Alive);
+                        }
                     }
                     Message::Shutdown() => {
                         println!("Node {} received termination message", &id);
@@ -102,7 +135,7 @@ impl DefaultMemberNode {
                 let node = node_ref_2.lock().unwrap();
                 match node.members.get_random_node() {
                     Some(n) => {
-                        n.1.lock().unwrap().send(Message::Ping((node.details, Arc::clone(&node.sender))));
+                        n.1.lock().unwrap().send(Message::Ping((node.details, Arc::clone(&node.sender)), Option::None));
                     }
                     None => {}
                 }
@@ -121,7 +154,7 @@ impl DefaultMemberNode {
     pub fn connection(&self) -> Arc<Mutex<Sender<Message>>> { Arc::clone(&self.sender) }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum MemberNodeState {
     Alive,
     Suspected,
@@ -168,9 +201,13 @@ impl MemberNodesRegistry {
 
     pub fn set_node_state(&mut self, id: u16, state: MemberNodeState) {
         match self.members.iter_mut().find(|ref i| { i.0.id == id }) {
-            Some(mut n) => { n.0.change_state(state) }
+            Some(n) => { n.0.change_state(state) }
             _ => {}
         }
+    }
+
+    pub fn get_by_id(&self, id: u16) -> Option<&MemberNodesRegistryDetails> {
+        self.members.iter().find(|ref i| { i.0.id == id })
     }
 
     pub fn get_random_node(&self) -> Option<&MemberNodesRegistryDetails> {
@@ -181,6 +218,19 @@ impl MemberNodesRegistry {
             let random_node = &self.members[random_index];
             Some(random_node)
         }
+    }
+
+    pub fn get_random_nodes(&self, number: usize) -> Vec<&MemberNodesRegistryDetails> {
+        use rand::prelude::*;
+        let mut possible_members: Vec<&MemberNodesRegistryDetails> = self.members
+            .iter()
+            .filter(|m| m.0.state == MemberNodeState::Alive)
+            .collect();
+        let mut rng = rand::thread_rng();
+
+        possible_members.shuffle(&mut rng);
+
+        possible_members.iter().take(number).cloned().collect()
     }
 
     fn is_empty(&self) -> bool {
