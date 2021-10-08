@@ -114,9 +114,8 @@ impl DefaultMemberNode {
                         }
                     }
                     Message::ProbeResponse(from, is_timed_out) => {
-                        let mut node = node_ref.lock().unwrap();
                         if is_timed_out.not() {
-                            node.members.set_node_state(from, MemberNodeState::Alive);
+                            node_ref.lock().unwrap().members.set_node_state(from, MemberNodeState::Alive);
                         }
                     }
                     Message::Shutdown() => {
@@ -131,7 +130,7 @@ impl DefaultMemberNode {
 
         thread::spawn(move || {
             loop {
-                thread::sleep(Duration::from_secs(1));
+                thread::sleep(Duration::from_secs(3));
                 let node = node_ref_2.lock().unwrap();
                 match node.members.get_random_node() {
                     Some(n) => {
@@ -214,23 +213,26 @@ impl MemberNodesRegistry {
         if self.is_empty() {
             None
         } else {
-            let random_index = thread_rng().gen_range(0..self.members.len());
-            let random_node = &self.members[random_index];
+            let  members: Vec<&MemberNodesRegistryDetails> = self.members
+                .iter()
+                .filter(|m| m.0.state == MemberNodeState::Alive)
+                .collect();
+
+            let random_index = thread_rng().gen_range(0..members.len());
+            let random_node = &members[random_index];
             Some(random_node)
         }
     }
 
     pub fn get_random_nodes(&self, number: usize) -> Vec<&MemberNodesRegistryDetails> {
         use rand::prelude::*;
-        let mut possible_members: Vec<&MemberNodesRegistryDetails> = self.members
+        let mut members: Vec<&MemberNodesRegistryDetails> = self.members
             .iter()
             .filter(|m| m.0.state == MemberNodeState::Alive)
             .collect();
-        let mut rng = rand::thread_rng();
 
-        possible_members.shuffle(&mut rng);
-
-        possible_members.iter().take(number).cloned().collect()
+        members.shuffle(&mut rand::thread_rng());
+        members.iter().take(number).cloned().collect()
     }
 
     fn is_empty(&self) -> bool {
