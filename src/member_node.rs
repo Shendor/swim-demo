@@ -1,9 +1,10 @@
-use std::{thread, vec};
+use std::{thread};
 use std::borrow::BorrowMut;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use std::hash::{Hash, Hasher};
 use std::ops::Not;
 use std::sync::{Arc, mpsc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
@@ -29,7 +30,6 @@ pub trait MemberNode {
 pub struct DefaultMemberNode {
     details: MemberNodeDetails,
     members: MemberNodesRegistry,
-    is_terminated: bool,
 }
 
 impl MemberNode for DefaultMemberNode {
@@ -45,15 +45,13 @@ impl MemberNode for DefaultMemberNode {
 impl DefaultMemberNode {
     pub fn new(id: u16, connection: Arc<Mutex<ConnectionFactory>>) -> MemberNodeDetails {
         let (sender, receiver): (Sender<Message>, Receiver<Message>) = mpsc::channel();
+        let connection_ref = Arc::clone(&connection);
         connection.lock().unwrap().add_connection(id, sender);
 
-        // let connection_ref = Arc::clone(&connection);
-        let mut is_terminated = false;
         let node_details = MemberNodeDetails::new(id);
         let node = DefaultMemberNode {
             details: node_details,
             members: MemberNodesRegistry::new(),
-            is_terminated: false,
         };
         let node_ref = Arc::new(Mutex::new(node));
         let node_ref_2 = Arc::clone(&node_ref);
@@ -68,80 +66,78 @@ impl DefaultMemberNode {
                         let mut node = node_ref.lock().unwrap();
                         node.members.add(from.clone());
 
-                        connection.lock().unwrap().send_to(from.id, Message::Response(node.details, String::from("hi")));
+                        DefaultMemberNode::send_to(from.id, Message::Response(node.details, String::from("hi")), &connection);
                     }
                     Message::Response(from, data) => {
                         let mut node = node_ref.lock().unwrap();
                         node.members.add(from.clone());
 
-                       println!("Node {} received response from Node {}: {}", id, from.id, data)
+                        println!("Node {} received response from Node {}: {}", id, from.id, data)
                     }
-                    // Message::Ping(from, probing_node) => {
-                    //     println!("Node {} received ping request from Node {}", &id, from.0.id);
-                    //     from.1.lock().unwrap().send(Message::PingResponse(id, probing_node, false));
-                    // }
-                    // Message::PingResponse(from, probing_node, is_timed_out) => {
-                    //     println!("Node {} received ping response from Node {}", &id, from);
-                    //     match probing_node {
-                    //         Some(n) => {
-                    //             n.1.lock().unwrap().send(Message::ProbeResponse(from, is_timed_out));
-                    //         }
-                    //         None => {
-                    //             if is_timed_out {
-                    //                 let mut node = node_ref.lock().unwrap();
-                    //                 let details = node.details;
-                    //                 node.members.set_node_state(from, MemberNodeState::Failed);
-                    //                 for n in node.members.get_random_nodes(3).iter() {
-                    //                     n.1.lock().unwrap().send(Message::ProbeRequest((details, Arc::clone(&node.sender)), from));
-                    //                 }
-                    //             } else {
-                    //                 node_ref.lock().unwrap().members.set_node_state(from, MemberNodeState::Alive)
-                    //             }
-                    //         }
-                    //     }
-                    // }
-                    // Message::ProbeRequest(from, timed_out_node) => {
-                    //     let node = node_ref.lock().unwrap();
-                    //     let details = node.details;
-                    //     let connection = Arc::clone(&node.sender);
-                    //
-                    //     match node.members.get_by_id(timed_out_node) {
-                    //         Some(n) => {
-                    //             n.1.lock().unwrap().send(Message::Ping((details, Arc::clone(&connection)), Option::Some(from)));
-                    //         }
-                    //         _ => {}
-                    //     }
-                    // }
-                    // Message::ProbeResponse(from, is_timed_out) => {
-                    //     if is_timed_out.not() {
-                    //         node_ref.lock().unwrap().members.set_node_state(from, MemberNodeState::Alive);
-                    //     }
-                    // }
+                    Message::Ping(from, probing_node) => {
+                        println!("Node {} received ping request from Node {}", &id, from.id);
+                        DefaultMemberNode::send_to(from.id, Message::PingResponse(id, probing_node, false), &connection);
+                    }
+                    Message::PingResponse(from, probing_node, is_timed_out) => {
+                        println!("Node {} received ping response from Node {}", &id, from);
+                        match probing_node {
+                            Some(n) => {
+                                DefaultMemberNode::send_to(n.id, Message::ProbeResponse(from, is_timed_out), &connection);
+                            }
+                            None => {
+                                if is_timed_out {
+                                    let mut node = node_ref.lock().unwrap();
+                                    let details = node.details;
+                                    node.members.set_node_state(from, MemberNodeState::Failed);
+                                    for n in node.members.get_random_nodes(3).iter() {
+                                        DefaultMemberNode::send_to(n.id, Message::ProbeRequest(details.clone(), from), &connection);
+                                    }
+                                } else {
+                                    node_ref.lock().unwrap().members.set_node_state(from, MemberNodeState::Alive)
+                                }
+                            }
+                        }
+                    }
+                    Message::ProbeRequest(from, timed_out_node) => {
+                        let node = node_ref.lock().unwrap();
+                        match node.members.get_by_id(timed_out_node) {
+                            Some(n) => {
+                                let details = node.details.clone();
+                                DefaultMemberNode::send_to(n.id, Message::Ping(details, Option::Some(from)), &connection);
+                            }
+                            _ => {}
+                        }
+                    }
+                    Message::ProbeResponse(from, is_timed_out) => {
+                        if is_timed_out.not() {
+                            node_ref.lock().unwrap().members.set_node_state(from, MemberNodeState::Alive);
+                        }
+                    }
                     Message::Shutdown() => {
                         println!("Node {} received termination message", &id);
-                        // let mut node = node_ref.lock().unwrap();
-                        is_terminated = true;
                         break;
                     }
-                    _ => {}
                 }
             }
         });
 
-        // thread::spawn(move || {
-        //     loop {
-        //         thread::sleep(Duration::from_secs(3));
-        //         let node = node_ref_2.lock().unwrap();
-        //         match node.members.get_random_node() {
-        //             Some(n) => {
-        //                 n.1.lock().unwrap().send(Message::Ping((node.details, Arc::clone(&node.sender)), Option::None));
-        //             }
-        //             None => {}
-        //         }
-        //         if node.is_terminated { break; }
-        //     }
-        // });
+        thread::spawn(move || {
+            loop {
+                thread::sleep(Duration::from_secs(3));
+                let node = node_ref_2.lock().unwrap();
+                match node.members.get_random_node() {
+                    Some(n) => {
+                        DefaultMemberNode::send_to(n.id, Message::Ping(node.details.clone(), Option::None), &connection_ref);
+                    }
+                    None => {}
+                }
+            }
+        });
         node_details
+    }
+
+    fn send_to(id: u16, message: Message, connection_factory: &Arc<Mutex<ConnectionFactory>>) {
+        connection_factory.lock().unwrap().send_to(id, message);
     }
 
     pub fn add_member_node(&mut self, member_node_details: MemberNodeDetails) {
@@ -149,8 +145,6 @@ impl DefaultMemberNode {
     }
 
     pub fn details(&self) -> MemberNodeDetails { self.details }
-
-    // pub fn connection(&self) -> Arc<Mutex<Sender<Message>>> { Arc::clone(&self.sender) }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -274,5 +268,9 @@ impl ConnectionFactory {
 
     pub fn add_connection(&mut self, id: u16, connection: Sender<Message>) {
         self.connection.insert(id, connection);
+    }
+
+    pub fn remove_connection(&mut self, id: u16) {
+        self.connection.remove(&id);
     }
 }
