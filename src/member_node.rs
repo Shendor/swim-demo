@@ -64,13 +64,13 @@ impl DefaultMemberNode {
                         println!("Node {} received message: {}", id, data);
 
                         let mut node = node_ref.lock().unwrap();
-                        node.members.add(from.clone());
+                        node.members.add(from);
 
                         DefaultMemberNode::send_to(from.id, Message::Response(node.details, String::from("hi")), &connection);
                     }
                     Message::Response(from, data) => {
                         let mut node = node_ref.lock().unwrap();
-                        node.members.add(from.clone());
+                        node.members.add(from);
 
                         println!("Node {} received response from Node {}: {}", id, from.id, data)
                     }
@@ -90,7 +90,7 @@ impl DefaultMemberNode {
                                     let details = node.details;
                                     node.members.set_node_state(from, MemberNodeState::Failed);
                                     for n in node.members.get_random_nodes(3).iter() {
-                                        DefaultMemberNode::send_to(n.id, Message::ProbeRequest(details.clone(), from), &connection);
+                                        DefaultMemberNode::send_to(n.id, Message::ProbeRequest(details, from), &connection);
                                     }
                                 } else {
                                     node_ref.lock().unwrap().members.set_node_state(from, MemberNodeState::Alive)
@@ -102,7 +102,7 @@ impl DefaultMemberNode {
                         let node = node_ref.lock().unwrap();
                         match node.members.get_by_id(timed_out_node) {
                             Some(n) => {
-                                let details = node.details.clone();
+                                let details = node.details;
                                 DefaultMemberNode::send_to(n.id, Message::Ping(details, Option::Some(from)), &connection);
                             }
                             _ => {}
@@ -127,7 +127,7 @@ impl DefaultMemberNode {
                 let node = node_ref_2.lock().unwrap();
                 match node.members.get_random_node() {
                     Some(n) => {
-                        DefaultMemberNode::send_to(n.id, Message::Ping(node.details.clone(), Option::None), &connection_ref);
+                        DefaultMemberNode::send_to(n.id, Message::Ping(node.details, Option::None), &connection_ref);
                     }
                     None => {}
                 }
