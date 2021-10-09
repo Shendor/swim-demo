@@ -1,7 +1,7 @@
 use std::collections::{HashMap};
 use std::ops::Not;
 use std::sync::{Arc, Mutex};
-use crate::member_node::{MemberNode, Message, DefaultMemberNode, ConnectionFactory, MemberNodeDetails};
+use crate::member_node::{Message, DefaultMemberNode, ConnectionFactory, MemberNodeDetails};
 
 pub trait NodeRequestRouter {
     fn start(&mut self);
@@ -11,7 +11,7 @@ pub trait NodeRequestRouter {
     fn shut_down(&self);
 }
 
-type Routes = HashMap<u16, MemberNodeDetails>;
+type Routes = HashMap<u16, Arc<Mutex<MemberNodeDetails>>>;
 
 pub struct DefaultNodeRequestRouter {
     routes: Routes,
@@ -31,12 +31,12 @@ impl NodeRequestRouter for DefaultNodeRequestRouter {
             self.add_node(from)
         }
         let from_node_details = self.routes.get(&from).unwrap();
-        self.connection_factory.lock().unwrap().send_to(to, Message::Request(from_node_details.clone(), format!("hello from {}", from)))
+        self.connection_factory.lock().unwrap().send_to(to, Message::Request(Arc::clone(&from_node_details), format!("hello from {}", from)))
     }
 
     fn shut_down(&self) {
         for node in self.routes.values() {
-            self.connection_factory.lock().unwrap().send_to(node.id(), Message::Shutdown());
+            self.connection_factory.lock().unwrap().send_to(node.lock().unwrap().id(), Message::Shutdown());
         }
     }
 }
@@ -52,7 +52,7 @@ impl DefaultNodeRequestRouter {
     fn add_node(&mut self, id: u16) {
         let node = DefaultMemberNode::new(id, Arc::clone(&self.connection_factory));
         // let node_ref = Arc::new(Mutex::new(node));
-        self.routes.insert(id, node.clone());
+        self.routes.insert(id, Arc::clone(&node));
 
         // DefaultMemberNode::run_echo(node_ref);
         println!("Node {} has been added", id);

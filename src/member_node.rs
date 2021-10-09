@@ -1,10 +1,8 @@
 use std::{thread};
-use std::borrow::BorrowMut;
 use std::collections::{HashMap};
 use std::hash::{Hash, Hasher};
 use std::ops::Not;
 use std::sync::{Arc, mpsc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
@@ -12,11 +10,11 @@ use rand;
 use rand::{Rng, thread_rng};
 
 pub enum Message {
-    Request(MemberNodeDetails, String),
-    Response(MemberNodeDetails, String),
-    Ping(MemberNodeDetails, Option<MemberNodeDetails>),
-    PingResponse(u16, Option<MemberNodeDetails>, bool),
-    ProbeRequest(MemberNodeDetails, u16),
+    Request(Arc<Mutex<MemberNodeDetails>>, String),
+    Response(Arc<Mutex<MemberNodeDetails>>, String),
+    Ping(Arc<Mutex<MemberNodeDetails>>, Option<Arc<Mutex<MemberNodeDetails>>>),
+    PingResponse(u16, Option<Arc<Mutex<MemberNodeDetails>>>, bool),
+    ProbeRequest(Arc<Mutex<MemberNodeDetails>>, u16),
     ProbeResponse(u16, bool),
     Shutdown(),
 }
@@ -28,29 +26,29 @@ pub trait MemberNode {
 }
 
 pub struct DefaultMemberNode {
-    details: MemberNodeDetails,
+    details: Arc<Mutex<MemberNodeDetails>>,
     members: MemberNodesRegistry,
 }
 
 impl MemberNode for DefaultMemberNode {
     fn send(&self, connection: Arc<Mutex<ConnectionFactory>>, message: Message) {
-        connection.lock().unwrap().send_to(self.details.id, message);
+        connection.lock().unwrap().send_to(self.details.lock().unwrap().id, message);
     }
 
     fn shut_down(&self, connection: Arc<Mutex<ConnectionFactory>>) {
-        connection.lock().unwrap().send_to(self.details.id, Message::Shutdown());
+        connection.lock().unwrap().send_to(self.details.lock().unwrap().id, Message::Shutdown());
     }
 }
 
 impl DefaultMemberNode {
-    pub fn new(id: u16, connection: Arc<Mutex<ConnectionFactory>>) -> MemberNodeDetails {
+    pub fn new(id: u16, connection: Arc<Mutex<ConnectionFactory>>) -> Arc<Mutex<MemberNodeDetails>> {
         let (sender, receiver): (Sender<Message>, Receiver<Message>) = mpsc::channel();
         let connection_ref = Arc::clone(&connection);
         connection.lock().unwrap().add_connection(id, sender);
 
-        let node_details = MemberNodeDetails::new(id);
+        let node_details = Arc::new(Mutex::new(MemberNodeDetails::new(id)));
         let node = DefaultMemberNode {
-            details: node_details,
+            details: Arc::clone(&node_details),
             members: MemberNodesRegistry::new(),
         };
         let node_ref = Arc::new(Mutex::new(node));
@@ -63,34 +61,37 @@ impl DefaultMemberNode {
                     Message::Request(from, data) => {
                         println!("Node {} received message: {}", id, data);
 
-                        let mut node = node_ref.lock().unwrap();
-                        node.members.add(from);
+                        let node = node_ref.lock().unwrap();
+                        let mut node_details = node.details.lock().unwrap();
+                        let from_id = from.lock().unwrap().id;
+                        node_details.members.add(from_id);
 
-                        DefaultMemberNode::send_to(from.id, Message::Response(node.details, String::from("hi")), &connection);
+                        DefaultMemberNode::send_to(from_id, Message::Response(Arc::clone(&node.details), String::from("hi")), &connection);
                     }
                     Message::Response(from, data) => {
                         let mut node = node_ref.lock().unwrap();
-                        node.members.add(from);
+                        let from_id = from.lock().unwrap().id;
+                        node.members.add(from_id);
 
-                        println!("Node {} received response from Node {}: {}", id, from.id, data)
+                        println!("Node {} received response from Node {}: {}", id, from_id, data)
                     }
                     Message::Ping(from, probing_node) => {
-                        println!("Node {} received ping request from Node {}", &id, from.id);
-                        DefaultMemberNode::send_to(from.id, Message::PingResponse(id, probing_node, false), &connection);
+                        let from_id = from.lock().unwrap().id;
+                        println!("Node {} received ping request from Node {}", &id, from_id);
+                        DefaultMemberNode::send_to(from_id, Message::PingResponse(id, probing_node, false), &connection);
                     }
                     Message::PingResponse(from, probing_node, is_timed_out) => {
                         println!("Node {} received ping response from Node {}", &id, from);
                         match probing_node {
                             Some(n) => {
-                                DefaultMemberNode::send_to(n.id, Message::ProbeResponse(from, is_timed_out), &connection);
+                                DefaultMemberNode::send_to(n.lock().unwrap().id, Message::ProbeResponse(from, is_timed_out), &connection);
                             }
                             None => {
                                 if is_timed_out {
                                     let mut node = node_ref.lock().unwrap();
-                                    let details = node.details;
                                     node.members.set_node_state(from, MemberNodeState::Failed);
-                                    for n in node.members.get_random_nodes(3).iter() {
-                                        DefaultMemberNode::send_to(n.id, Message::ProbeRequest(details, from), &connection);
+                                    for m_id in node.members.get_random_nodes(3).iter() {
+                                        DefaultMemberNode::send_to(*m_id, Message::ProbeRequest(Arc::clone(&node.details), from), &connection);
                                     }
                                 } else {
                                     node_ref.lock().unwrap().members.set_node_state(from, MemberNodeState::Alive)
@@ -100,13 +101,7 @@ impl DefaultMemberNode {
                     }
                     Message::ProbeRequest(from, timed_out_node) => {
                         let node = node_ref.lock().unwrap();
-                        match node.members.get_by_id(timed_out_node) {
-                            Some(n) => {
-                                let details = node.details;
-                                DefaultMemberNode::send_to(n.id, Message::Ping(details, Option::Some(from)), &connection);
-                            }
-                            _ => {}
-                        }
+                        DefaultMemberNode::send_to(timed_out_node, Message::Ping(Arc::clone(&node.details), Option::Some(from)), &connection);
                     }
                     Message::ProbeResponse(from, is_timed_out) => {
                         if is_timed_out.not() {
@@ -126,8 +121,8 @@ impl DefaultMemberNode {
                 thread::sleep(Duration::from_secs(3));
                 let node = node_ref_2.lock().unwrap();
                 match node.members.get_random_node() {
-                    Some(n) => {
-                        DefaultMemberNode::send_to(n.id, Message::Ping(node.details, Option::None), &connection_ref);
+                    Some(m_id) => {
+                        DefaultMemberNode::send_to(*m_id, Message::Ping(Arc::clone(&node.details), Option::None), &connection_ref);
                     }
                     None => {}
                 }
@@ -140,11 +135,11 @@ impl DefaultMemberNode {
         connection_factory.lock().unwrap().send_to(id, message);
     }
 
-    pub fn add_member_node(&mut self, member_node_details: MemberNodeDetails) {
-        self.members.add(member_node_details);
+    pub fn add_member_node(&mut self, id: u16) {
+        self.members.add(id);
     }
 
-    pub fn details(&self) -> MemberNodeDetails { self.details }
+    pub fn details(&self) -> &Arc<Mutex<MemberNodeDetails>> { &self.details }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -154,10 +149,11 @@ pub enum MemberNodeState {
     Failed,
 }
 
-#[derive(Clone, Copy, Eq)]
+#[derive(Clone)]
 pub struct MemberNodeDetails {
     id: u16,
     state: MemberNodeState,
+    members: MemberNodesRegistry,
 }
 
 impl Hash for MemberNodeDetails {
@@ -177,6 +173,7 @@ impl MemberNodeDetails {
         MemberNodeDetails {
             id,
             state: MemberNodeState::Alive,
+            members: MemberNodesRegistry::new(),
         }
     }
 
@@ -189,8 +186,9 @@ impl MemberNodeDetails {
     pub fn change_state(&mut self, state: MemberNodeState) { self.state = state }
 }
 
+#[derive(Clone)]
 pub struct MemberNodesRegistry {
-    members: HashMap<u16, MemberNodeDetails>,
+    members: HashMap<u16, MemberNodeState>,
 }
 
 impl MemberNodesRegistry {
@@ -200,27 +198,24 @@ impl MemberNodesRegistry {
         }
     }
 
-    pub fn add(&mut self, member_node_details: MemberNodeDetails) {
-        self.members.insert(member_node_details.id, member_node_details);
+    pub fn add(&mut self, id: u16) {
+        self.members.insert(id, MemberNodeState::Alive);
     }
 
     pub fn set_node_state(&mut self, id: u16, state: MemberNodeState) {
-        match self.members.get_mut(&id) {
-            Some(n) => { n.borrow_mut().change_state(state) }
-            _ => {}
-        }
+        self.members.insert(id, state);
     }
 
-    pub fn get_by_id(&self, id: u16) -> Option<&MemberNodeDetails> {
+    pub fn get_state_for(&self, id: u16) -> Option<&MemberNodeState> {
         self.members.get(&id)
     }
 
-    pub fn get_random_node(&self) -> Option<&MemberNodeDetails> {
+    pub fn get_random_node(&self) -> Option<&u16> {
         if self.is_empty() {
             None
         } else {
-            let members: Vec<&MemberNodeDetails> = self.members.values()
-                .filter(|m| m.state == MemberNodeState::Alive)
+            let members: Vec<&u16> = self.members.keys()
+                .filter(|id| *self.members.get(id).unwrap() == MemberNodeState::Alive)
                 .collect();
 
             let random_index = thread_rng().gen_range(0..members.len());
@@ -229,14 +224,14 @@ impl MemberNodesRegistry {
         }
     }
 
-    pub fn get_random_nodes(&self, number: usize) -> Vec<&MemberNodeDetails> {
+    pub fn get_random_nodes(&self, number: usize) -> Vec<u16> {
         use rand::prelude::*;
-        let mut members: Vec<&MemberNodeDetails> = self.members.values()
-            .filter(|m| m.state == MemberNodeState::Alive)
+        let mut members: Vec<&u16> = self.members.keys()
+            .filter(|id| *self.members.get(id).unwrap() == MemberNodeState::Alive)
             .collect();
 
         members.shuffle(&mut rand::thread_rng());
-        members.iter().take(number).cloned().collect()
+        members.iter().take(number).cloned().cloned().collect()
     }
 
     fn is_empty(&self) -> bool {
@@ -261,7 +256,9 @@ impl ConnectionFactory {
 
     pub fn send_to(&self, id: u16, message: Message) {
         match self.connection.get(&id) {
-            Some(c) => { c.send(message); }
+            Some(c) => {
+                c.send(message).map_err(|err| println!("{:?}", err));
+            }
             _ => {}
         }
     }
