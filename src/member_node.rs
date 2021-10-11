@@ -64,6 +64,7 @@ impl DefaultMemberNode {
 
                         let mut node = node_ref.lock().unwrap();
                         let from_id = from.lock().unwrap().id;
+                        node.add_member_node(from_id);
                         node.members.add(from_id);
 
                         DefaultMemberNode::send_to(from_id, Message::Response(Arc::clone(&node.details), String::from("hi")), &connection);
@@ -72,7 +73,9 @@ impl DefaultMemberNode {
                         let mut node = node_ref.lock().unwrap();
                         let from_node = from.lock().unwrap();
                         let from_id = from_node.id;
-                        node.members.add_all(id, &from_node.members);
+                        // println!("Responding node {} has members {}", from_id, &from_node.members);
+                        node.add_member_nodes(&from_node.members);
+                        node.add_member_node(from_id);
                         node.members.add(from_id);
 
                         println!("Node {} received response from Node {}: {}", id, from_id, data)
@@ -141,7 +144,15 @@ impl DefaultMemberNode {
     }
 
     pub fn add_member_node(&mut self, id: u16) {
+        self.details.lock().unwrap().members.add(id);
         self.members.add(id);
+    }
+
+    pub fn add_member_nodes(&mut self, members: &MemberNodesRegistry) {
+        let mut node = self.details.lock().unwrap();
+        let id = node.id;
+        node.members.add_all(id, members);
+        self.members.add_all(id, members);
     }
 
     pub fn details(&self) -> &Arc<Mutex<MemberNodeDetails>> { &self.details }
