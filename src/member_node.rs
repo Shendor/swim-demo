@@ -62,10 +62,9 @@ impl DefaultMemberNode {
                     Message::Request(from, data) => {
                         println!("Node {} received message: {}", id, data);
 
-                        let node = node_ref.lock().unwrap();
-                        let mut node_details = node.details.lock().unwrap();
+                        let mut node = node_ref.lock().unwrap();
                         let from_id = from.lock().unwrap().id;
-                        node_details.members.add(from_id);
+                        node.members.add(from_id);
 
                         DefaultMemberNode::send_to(from_id, Message::Response(Arc::clone(&node.details), String::from("hi")), &connection);
                     }
@@ -73,7 +72,7 @@ impl DefaultMemberNode {
                         let mut node = node_ref.lock().unwrap();
                         let from_node = from.lock().unwrap();
                         let from_id = from_node.id;
-                        // node.members.add_all(id, &from_node.members);
+                        node.members.add_all(id, &from_node.members);
                         node.members.add(from_id);
 
                         println!("Node {} received response from Node {}: {}", id, from_id, data)
@@ -214,7 +213,7 @@ impl MemberNodesRegistry {
         self.members.insert(id, MemberNodeState::Alive);
     }
 
-    pub fn add_all(&mut self, self_id : u16, members: &MemberNodesRegistry) {
+    pub fn add_all(&mut self, self_id: u16, members: &MemberNodesRegistry) {
         for id in members.members.keys().filter(|i| **i != self_id) {
             match members.members.get(id) {
                 Some(state) => {
