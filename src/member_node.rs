@@ -73,7 +73,7 @@ impl DefaultMemberNode {
                         let mut node = node_ref.lock().unwrap();
                         let from_node = from.lock().unwrap();
                         let from_id = from_node.id;
-                        // println!("Responding node {} has members {}", from_id, &from_node.members);
+
                         node.add_member_nodes(&from_node.members);
                         node.add_member_node(from_id);
                         node.members.add(from_id);
@@ -81,8 +81,10 @@ impl DefaultMemberNode {
                         println!("Node {} received response from Node {}: {}", id, from_id, data)
                     }
                     Message::Ping(from, probing_node) => {
-                        let from_id = from.lock().unwrap().id;
-                        let node = node_ref.lock().unwrap();
+                        let from_node = from.lock().unwrap();
+                        let from_id = from_node.id;
+                        let mut node = node_ref.lock().unwrap();
+                        node.add_member_nodes(&from_node.members);
 
                         println!("Node {} received ping request from Node {}, with members: {}", &id, from_id, node.members);
 
