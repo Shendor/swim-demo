@@ -30,8 +30,8 @@ impl NodeRequestRouter for DefaultNodeRequestRouter {
         if self.routes.contains_key(&from).not() {
             self.add_node(from)
         }
-        let from_node_details = self.routes.get(&from).unwrap();
-        self.connection_factory.lock().unwrap().send_to(to, Message::Request(Arc::clone(&from_node_details), format!("hello from {}", from)))
+        let from_node_details = self.routes.get(&from).unwrap().lock().unwrap().serialize();
+        self.connection_factory.lock().unwrap().send_to(to, Message::Request(from_node_details, format!("hello from {}", from)))
     }
 
     fn shut_down(&self) {
