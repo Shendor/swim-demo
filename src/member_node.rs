@@ -1,7 +1,8 @@
 use std::{thread};
 use std::collections::{HashMap};
+use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
-use std::ops::Not;
+use std::ops::{Add, Not};
 use std::sync::{Arc, mpsc, Mutex};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
@@ -70,14 +71,19 @@ impl DefaultMemberNode {
                     }
                     Message::Response(from, data) => {
                         let mut node = node_ref.lock().unwrap();
-                        let from_id = from.lock().unwrap().id;
+                        let from_node = from.lock().unwrap();
+                        let from_id = from_node.id;
+                        // node.members.add_all(id, &from_node.members);
                         node.members.add(from_id);
 
                         println!("Node {} received response from Node {}: {}", id, from_id, data)
                     }
                     Message::Ping(from, probing_node) => {
                         let from_id = from.lock().unwrap().id;
-                        println!("Node {} received ping request from Node {}", &id, from_id);
+                        let node = node_ref.lock().unwrap();
+
+                        println!("Node {} received ping request from Node {}, with members: {}", &id, from_id, node.members);
+
                         DefaultMemberNode::send_to(from_id, Message::PingResponse(id, probing_node, false), &connection);
                     }
                     Message::PingResponse(from, probing_node, is_timed_out) => {
@@ -142,11 +148,17 @@ impl DefaultMemberNode {
     pub fn details(&self) -> &Arc<Mutex<MemberNodeDetails>> { &self.details }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MemberNodeState {
     Alive,
     Suspected,
     Failed,
+}
+
+impl Display for MemberNodeState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 #[derive(Clone)]
@@ -186,7 +198,7 @@ impl MemberNodeDetails {
     pub fn change_state(&mut self, state: MemberNodeState) { self.state = state }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MemberNodesRegistry {
     members: HashMap<u16, MemberNodeState>,
 }
@@ -200,6 +212,17 @@ impl MemberNodesRegistry {
 
     pub fn add(&mut self, id: u16) {
         self.members.insert(id, MemberNodeState::Alive);
+    }
+
+    pub fn add_all(&mut self, self_id : u16, members: &MemberNodesRegistry) {
+        for id in members.members.keys().filter(|i| **i != self_id) {
+            match members.members.get(id) {
+                Some(state) => {
+                    self.members.insert(*id, *state);
+                }
+                None => {}
+            }
+        }
     }
 
     pub fn set_node_state(&mut self, id: u16, state: MemberNodeState) {
@@ -236,6 +259,16 @@ impl MemberNodesRegistry {
 
     fn is_empty(&self) -> bool {
         self.members.is_empty()
+    }
+}
+
+impl Display for MemberNodesRegistry {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut s = String::new();
+        for id in self.members.keys() {
+            s = s.add(format!("{} - {}; ", id, self.members.get(id).unwrap()).as_str());
+        }
+        write!(f, "{:?}", s)
     }
 }
 
