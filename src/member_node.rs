@@ -11,24 +11,8 @@ pub mod swim_node {
     use rand::{Rng, thread_rng};
     use crate::message::swim_node::Message;
 
-    pub trait MemberNode {
-        fn host(&self) -> u16;
-
-        fn serialize(&self) -> MemberNodeDetails;
-    }
-
     pub struct DefaultMemberNode {
         details: MemberNodeDetails,
-    }
-
-    impl MemberNode for DefaultMemberNode {
-        fn host(&self) -> u16 {
-            self.details.host
-        }
-
-        fn serialize(&self) -> MemberNodeDetails {
-            self.details.serialize()
-        }
     }
 
     impl DefaultMemberNode {
@@ -54,7 +38,7 @@ pub mod swim_node {
                             let mut node = node_ref.lock().unwrap();
                             node.add_member_node(from.host);
 
-                            DefaultMemberNode::send_to(from.host, Message::Response(node.serialize(), String::from("hi")), &connection);
+                            send_to(from.host, Message::Response(node.serialize(), String::from("hi")), &connection);
                         }
                         Message::Response(from, data) => {
                             let mut node = node_ref.lock().unwrap();
@@ -68,20 +52,20 @@ pub mod swim_node {
 
                             println!("Node {} received ping request from Node {}, with members: {}", &host, from.host, node.details.members);
 
-                            DefaultMemberNode::send_to(from.host, Message::PingResponse(host, probing_node, false), &connection);
+                            send_to(from.host, Message::PingResponse(host, probing_node, false), &connection);
                         }
                         Message::PingResponse(from, probing_node, is_timed_out) => {
                             println!("Node {} received ping response from Node {}", &host, from);
                             match probing_node {
                                 Some(n) => {
-                                    DefaultMemberNode::send_to(n.host, Message::ProbeResponse(from, is_timed_out), &connection);
+                                    send_to(n.host, Message::ProbeResponse(from, is_timed_out), &connection);
                                 }
                                 None => {
                                     let mut node = node_ref.lock().unwrap();
                                     if is_timed_out {
                                         node.set_member_node_state(from, MemberNodeState::Failed);
                                         for m_id in node.get_random_nodes(3).iter() {
-                                            DefaultMemberNode::send_to(*m_id, Message::ProbeRequest(node.serialize(), from), &connection);
+                                            send_to(*m_id, Message::ProbeRequest(node.serialize(), from), &connection);
                                         }
                                     } else {
                                         node.set_member_node_state(from, MemberNodeState::Alive)
@@ -91,7 +75,7 @@ pub mod swim_node {
                         }
                         Message::ProbeRequest(from, timed_out_node) => {
                             let node = node_ref.lock().unwrap();
-                            DefaultMemberNode::send_to(timed_out_node, Message::Ping(node.serialize(), Option::Some(from)), &connection);
+                            send_to(timed_out_node, Message::Ping(node.serialize(), Option::Some(from)), &connection);
                         }
                         Message::ProbeResponse(from, is_timed_out) => {
                             if is_timed_out.not() {
@@ -112,7 +96,7 @@ pub mod swim_node {
                     let node = node_ref_2.lock().unwrap();
                     match node.get_random_node() {
                         Some(m_id) => {
-                            DefaultMemberNode::send_to(*m_id, Message::Ping(node.serialize(), Option::None), &connection_ref);
+                            send_to(*m_id, Message::Ping(node.serialize(), Option::None), &connection_ref);
                         }
                         None => {}
                     }
@@ -121,19 +105,15 @@ pub mod swim_node {
             node_details
         }
 
-        fn send_to(host: u16, message: Message, connection_factory: &Arc<Mutex<ConnectionFactory>>) {
-            connection_factory.lock().unwrap().send_to(host, message);
-        }
-
         fn get_random_nodes(&self, number: usize) -> Vec<u16> {
             self.details.members.get_random_nodes(number)
         }
 
-        pub fn add_member_node(&mut self, host: u16) {
+        fn add_member_node(&mut self, host: u16) {
             self.details.members.add(host);
         }
 
-        pub fn add_member_nodes(&mut self, members: &MemberNodesRegistry) {
+        fn add_member_nodes(&mut self, members: &MemberNodesRegistry) {
             self.details.members.add_all(self.details.host, members);
         }
 
@@ -141,9 +121,17 @@ pub mod swim_node {
             self.details.members.get_random_node()
         }
 
-        pub fn set_member_node_state(&mut self, member_node_id: u16, state: MemberNodeState) {
+        fn set_member_node_state(&mut self, member_node_id: u16, state: MemberNodeState) {
             self.details.members.set_node_state(member_node_id, state);
         }
+
+        fn serialize(&self) -> MemberNodeDetails {
+            self.details.serialize()
+        }
+    }
+
+    fn send_to(host: u16, message: Message, connection_factory: &Arc<Mutex<ConnectionFactory>>) {
+        connection_factory.lock().unwrap().send_to(host, message);
     }
 
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]

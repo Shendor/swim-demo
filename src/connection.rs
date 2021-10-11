@@ -21,7 +21,7 @@ pub mod swim_node {
         pub fn send_to(&self, host: u16, message: Message) {
             match self.connection.get(&host) {
                 Some(c) => {
-                    c.send(message).map_err(|err| println!("{:?}", err));
+                    c.send(message).unwrap_or_else(|err| println!("Failed to send message from host {} - {:?}", host, err))
                 }
                 _ => {}
             }
