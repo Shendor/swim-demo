@@ -2,7 +2,8 @@ use std::collections::{HashMap};
 use std::ops::Not;
 use std::sync::{Arc, Mutex};
 use crate::connection::swim_node::ConnectionFactory;
-use crate::member_node::swim_node::{DefaultMemberNode, MemberNodeDetails, Message};
+use crate::member_node::swim_node::{DefaultMemberNode, MemberNodeDetails};
+use crate::message::swim_node::Message;
 
 pub trait NodeRequestRouter {
     fn start(&mut self);

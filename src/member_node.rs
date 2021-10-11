@@ -9,6 +9,7 @@ pub mod swim_node {
     use std::time::Duration;
     use rand;
     use rand::{Rng, thread_rng};
+    use crate::message::swim_node::Message;
 
     pub trait MemberNode {
         fn host(&self) -> u16;
@@ -270,16 +271,5 @@ pub mod swim_node {
             }
             write!(f, "{:?}", s)
         }
-    }
-
-
-    pub enum Message {
-        Request(MemberNodeDetails, String),
-        Response(MemberNodeDetails, String),
-        Ping(MemberNodeDetails, Option<MemberNodeDetails>),
-        PingResponse(u16, Option<MemberNodeDetails>, bool),
-        ProbeRequest(MemberNodeDetails, u16),
-        ProbeResponse(u16, bool),
-        Shutdown(),
     }
 }

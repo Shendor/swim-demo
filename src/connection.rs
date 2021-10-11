@@ -1,7 +1,7 @@
 pub mod swim_node {
     use std::collections::HashMap;
     use std::sync::mpsc::Sender;
-    use crate::member_node::swim_node::Message;
+    use crate::message::swim_node::Message;
 
     pub struct ConnectionFactory {
         connection: HashMap<u16, Sender<Message>>,
