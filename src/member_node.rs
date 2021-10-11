@@ -15,6 +15,9 @@ pub mod swim_node {
         details: MemberNodeDetails,
     }
 
+    const PING_DELAY: u64 = 2;
+    const NUMBER_RANDOM_PROBE_NODES: usize = 3;
+
     impl DefaultMemberNode {
         pub fn new(host: u16, connection: Arc<Mutex<ConnectionFactory>>) -> Arc<Mutex<MemberNodeDetails>> {
             let (sender, receiver): (Sender<Message>, Receiver<Message>) = mpsc::channel();
@@ -52,10 +55,10 @@ pub mod swim_node {
 
                             println!("Node {} received ping request from Node {}, with members: {}", &host, from.host, node.details.members);
 
+
                             send_to(from.host, Message::PingResponse(host, probing_node, false), &connection);
                         }
                         Message::PingResponse(from, probing_node, is_timed_out) => {
-                            println!("Node {} received ping response from Node {}", &host, from);
                             match probing_node {
                                 Some(n) => {
                                     send_to(n.host, Message::ProbeResponse(from, is_timed_out), &connection);
@@ -63,23 +66,30 @@ pub mod swim_node {
                                 None => {
                                     let mut node = node_ref.lock().unwrap();
                                     if is_timed_out {
-                                        node.set_member_node_state(from, MemberNodeState::Failed);
-                                        for m_id in node.get_random_nodes(3).iter() {
-                                            send_to(*m_id, Message::ProbeRequest(node.serialize(), from), &connection);
+                                        println!("Node {} didn't received ping response from Node {}. Starting to probe it...", &host, from);
+                                        node.set_member_node_state(from, MemberNodeState::Suspected);
+                                        for random_host in node.get_random_nodes(NUMBER_RANDOM_PROBE_NODES).iter() {
+                                            send_to(*random_host, Message::ProbeRequest(node.serialize(), from), &connection);
                                         }
                                     } else {
+                                        println!("Node {} received ping response from Node {}", &host, from);
                                         node.set_member_node_state(from, MemberNodeState::Alive)
                                     }
                                 }
                             }
                         }
                         Message::ProbeRequest(from, timed_out_node) => {
+                            println!("Node {} probing timed-out Node {}", &host, timed_out_node);
+
                             let node = node_ref.lock().unwrap();
                             send_to(timed_out_node, Message::Ping(node.serialize(), Option::Some(from)), &connection);
                         }
                         Message::ProbeResponse(from, is_timed_out) => {
                             if is_timed_out.not() {
+                                println!("Node {} reported back on-line", &from);
                                 node_ref.lock().unwrap().set_member_node_state(from, MemberNodeState::Alive);
+                            } else {
+                                println!("Node {} is still off-line", &from);
                             }
                         }
                         Message::Shutdown() => {
@@ -92,7 +102,7 @@ pub mod swim_node {
 
             thread::spawn(move || {
                 loop {
-                    thread::sleep(Duration::from_secs(3));
+                    thread::sleep(Duration::from_secs(PING_DELAY));
                     let node = node_ref_2.lock().unwrap();
                     match node.get_random_node() {
                         Some(m_id) => {
@@ -157,7 +167,7 @@ pub mod swim_node {
     impl MemberNodeDetails {
         pub fn new(host: u16) -> Self {
             MemberNodeDetails {
-                host: host,
+                host,
                 state: MemberNodeState::Alive,
                 members: MemberNodesRegistry::new(),
             }
@@ -207,7 +217,11 @@ pub mod swim_node {
             for host in members.members.keys().filter(|i| **i != self_id) {
                 match members.members.get(host) {
                     Some(state) => {
-                        self.members.insert(*host, *state);
+                        if *state == MemberNodeState::Failed {
+                            self.members.remove(host);
+                        } else {
+                            self.members.insert(*host, *state);
+                        }
                     }
                     None => {}
                 }
@@ -215,7 +229,16 @@ pub mod swim_node {
         }
 
         pub fn set_node_state(&mut self, host: u16, state: MemberNodeState) {
-            self.members.insert(host, state);
+            match self.members.get(&host) {
+                Some(m) => {
+                    if state == MemberNodeState::Suspected && *m == MemberNodeState::Suspected {
+                        self.members.insert(host, MemberNodeState::Failed);
+                    } else {
+                        self.members.insert(host, state);
+                    }
+                }
+                None => {}
+            };
         }
 
         pub fn get_state_for(&self, host: u16) -> Option<&MemberNodeState> {
@@ -227,7 +250,7 @@ pub mod swim_node {
                 None
             } else {
                 let members: Vec<&u16> = self.members.keys()
-                    .filter(|host| *self.members.get(host).unwrap() == MemberNodeState::Alive)
+                    .filter(|host| self.is_host_not_failed(host))
                     .collect();
 
                 let random_index = thread_rng().gen_range(0..members.len());
@@ -244,6 +267,10 @@ pub mod swim_node {
 
             members.shuffle(&mut rand::thread_rng());
             members.iter().take(number).cloned().cloned().collect()
+        }
+
+        fn is_host_not_failed(&self, host: &&u16) -> bool {
+            *self.members.get(host).unwrap() != MemberNodeState::Failed
         }
 
         fn is_empty(&self) -> bool {

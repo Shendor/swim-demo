@@ -8,7 +8,7 @@ use crate::message::swim_node::Message;
 pub trait NodeRequestRouter {
     fn start(&mut self);
 
-    fn send_to(&mut self, from: u16, to: u16);
+    fn send(&mut self, from: u16, to: u16);
 
     fn shut_down(&self);
 }
@@ -27,7 +27,7 @@ impl NodeRequestRouter for DefaultNodeRequestRouter {
         }
     }
 
-    fn send_to(&mut self, from: u16, to: u16) {
+    fn send(&mut self, from: u16, to: u16) {
         if self.routes.contains_key(&from).not() {
             self.add_node(from)
         }
