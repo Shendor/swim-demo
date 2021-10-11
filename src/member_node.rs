@@ -65,7 +65,6 @@ impl DefaultMemberNode {
                         let mut node = node_ref.lock().unwrap();
                         let from_id = from.lock().unwrap().id;
                         node.add_member_node(from_id);
-                        node.members.add(from_id);
 
                         DefaultMemberNode::send_to(from_id, Message::Response(Arc::clone(&node.details), String::from("hi")), &connection);
                     }
@@ -76,7 +75,6 @@ impl DefaultMemberNode {
 
                         node.add_member_nodes(&from_node.members);
                         node.add_member_node(from_id);
-                        node.members.add(from_id);
 
                         println!("Node {} received response from Node {}: {}", id, from_id, data)
                     }
