@@ -11,25 +11,26 @@ pub mod swim_node {
     use rand::{Rng, thread_rng};
     use crate::message::swim_node::Message;
 
+    const PING_DELAY: u64 = 1;
+    const NUMBER_RANDOM_PROBE_NODES: usize = 3;
+
     pub struct DefaultMemberNode {
         details: MemberNodeDetails,
     }
 
-    const PING_DELAY: u64 = 2;
-    const NUMBER_RANDOM_PROBE_NODES: usize = 3;
-
     impl DefaultMemberNode {
-        pub fn new(host: u16, connection: Arc<Mutex<ConnectionFactory>>) -> Arc<Mutex<MemberNodeDetails>> {
+        pub fn new(host: u16, connection: Arc<Mutex<ConnectionFactory>>) -> Arc<Mutex<DefaultMemberNode>> {
             let (sender, receiver): (Sender<Message>, Receiver<Message>) = mpsc::channel();
             let connection_ref = Arc::clone(&connection);
             connection.lock().unwrap().add_connection(host, sender);
 
-            let node_details = Arc::new(Mutex::new(MemberNodeDetails::new(host)));
             let node = DefaultMemberNode {
                 details: MemberNodeDetails::new(host)
             };
             let node_ref = Arc::new(Mutex::new(node));
             let node_ref_2 = Arc::clone(&node_ref);
+            let node_ref_3 = Arc::clone(&node_ref);
+            // let node_details = Arc::new(Mutex::new(node.details));
 
             thread::spawn(move || {
                 println!("Node {} started to listen requests", &host);
@@ -54,7 +55,6 @@ pub mod swim_node {
                             node.add_member_nodes(&from.members);
 
                             println!("Node {} received ping request from Node {}, with members: {}", &host, from.host, node.details.members);
-
 
                             send_to(from.host, Message::PingResponse(host, probing_node, false), &connection);
                         }
@@ -104,15 +104,21 @@ pub mod swim_node {
                 loop {
                     thread::sleep(Duration::from_secs(PING_DELAY));
                     let node = node_ref_2.lock().unwrap();
-                    match node.get_random_node() {
-                        Some(m_id) => {
-                            send_to(*m_id, Message::Ping(node.serialize(), Option::None), &connection_ref);
+                    if node.details.state != MemberNodeState::Failed {
+                        match node.get_random_node() {
+                            Some(m_id) => {
+                                send_to(*m_id, Message::Ping(node.serialize(), Option::None), &connection_ref);
+                            }
+                            None => {}
                         }
-                        None => {}
                     }
                 }
             });
-            node_details
+            node_ref_3
+        }
+
+        pub fn details(&self) -> &MemberNodeDetails {
+            &self.details
         }
 
         fn get_random_nodes(&self, number: usize) -> Vec<u16> {
@@ -178,6 +184,8 @@ pub mod swim_node {
         pub fn name(&self) -> String { format!("node-{}", self.host) }
 
         pub fn state(&self) -> &MemberNodeState { &self.state }
+
+        pub fn members(&self) -> &MemberNodesRegistry { &self.members }
 
         pub fn change_state(&mut self, state: MemberNodeState) { self.state = state }
 
