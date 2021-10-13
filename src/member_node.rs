@@ -30,7 +30,6 @@ pub mod swim_node {
             let node_ref = Arc::new(Mutex::new(node));
             let node_ref_2 = Arc::clone(&node_ref);
             let node_ref_3 = Arc::clone(&node_ref);
-            // let node_details = Arc::new(Mutex::new(node.details));
 
             thread::spawn(move || {
                 println!("Node {} started to listen requests", &host);
@@ -56,7 +55,7 @@ pub mod swim_node {
 
                             println!("Node {} received ping request from Node {}, with members: {}", &host, from.host, node.details.members);
 
-                            send_to(from.host, Message::PingResponse(host, probing_node, false), &connection);
+                            send_to(from.host, Message::PingResponse(host, probing_node, node.is_alive().not()), &connection);
                         }
                         Message::PingResponse(from, probing_node, is_timed_out) => {
                             match probing_node {
@@ -119,6 +118,12 @@ pub mod swim_node {
 
         pub fn details(&self) -> &MemberNodeDetails {
             &self.details
+        }
+
+        pub fn change_state(&mut self, state: MemberNodeState) { self.details.change_state(state); }
+
+        fn is_alive(&self) -> bool {
+            *self.details.state() == MemberNodeState::Alive
         }
 
         fn get_random_nodes(&self, number: usize) -> Vec<u16> {
@@ -254,15 +259,14 @@ pub mod swim_node {
         }
 
         pub fn get_random_node(&self) -> Option<&u16> {
-            if self.is_empty() {
+            let members: Vec<&u16> = self.members.keys()
+                .filter(|host| self.is_host_not_failed(host))
+                .collect();
+            if members.is_empty() {
                 None
             } else {
-                let members: Vec<&u16> = self.members.keys()
-                    .filter(|host| self.is_host_not_failed(host))
-                    .collect();
-
                 let random_index = thread_rng().gen_range(0..members.len());
-                let random_node = &members[random_index];
+                let random_node = members[random_index];
                 Some(random_node)
             }
         }

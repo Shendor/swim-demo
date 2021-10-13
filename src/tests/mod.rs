@@ -65,5 +65,26 @@ mod tests {
             assert_eq!(MemberNodeState::Alive, *node1.lock().unwrap().details().members().get_state_for(2).unwrap());
             assert_eq!(MemberNodeState::Alive, *node2.lock().unwrap().details().members().get_state_for(1).unwrap());
         }
+
+        #[test]
+        fn test_member_nodes_when_one_times_out() {
+            let connection_factory = ConnectionFactory::new();
+            let connection_ref = Arc::new(Mutex::new(connection_factory));
+            let node1 = DefaultMemberNode::new(1, Arc::clone(&connection_ref));
+            let mut node2 = DefaultMemberNode::new(2, Arc::clone(&connection_ref));
+
+            let serialized_details = node1.lock().unwrap().details().serialize();
+            connection_ref.lock().unwrap().send_to(2, Message::Request(serialized_details, String::from("hello")));
+
+            node2.lock().unwrap().change_state(MemberNodeState::Failed);
+
+            thread::sleep(Duration::from_secs(2));
+
+            assert_eq!(MemberNodeState::Suspected, *node1.lock().unwrap().details().members().get_state_for(2).unwrap());
+
+            thread::sleep(Duration::from_secs(2));
+
+            assert_eq!(MemberNodeState::Failed, *node1.lock().unwrap().details().members().get_state_for(2).unwrap());
+        }
     }
 }
