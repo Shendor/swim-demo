@@ -1,7 +1,7 @@
 use std::collections::{HashMap};
 use std::ops::Not;
 use std::sync::{Arc, Mutex};
-use crate::connection::swim_node::ConnectionFactory;
+use crate::connection::swim_node::{ConnectionRegistry};
 use crate::member_node::swim_node::{DefaultMemberNode, MemberNode};
 use crate::message::swim_node::Message;
 
@@ -17,7 +17,8 @@ type Routes = HashMap<u16, Arc<Mutex<dyn MemberNode>>>;
 
 pub struct DefaultNodeRequestRouter {
     routes: Routes,
-    connection_factory: Arc<Mutex<ConnectionFactory>>,
+    connection_factory: Arc<Mutex<dyn ConnectionRegistry>>,
+    node_factory: Box<dyn NodeFactory<DefaultMemberNode>>
 }
 
 impl NodeRequestRouter for DefaultNodeRequestRouter {
@@ -43,16 +44,30 @@ impl NodeRequestRouter for DefaultNodeRequestRouter {
 }
 
 impl DefaultNodeRequestRouter {
-    pub fn new() -> DefaultNodeRequestRouter {
-        DefaultNodeRequestRouter {
+    pub fn new(node_factory : Box<dyn NodeFactory<DefaultMemberNode>>,
+               connection_registry : Arc<Mutex<dyn ConnectionRegistry>>) -> Box<DefaultNodeRequestRouter> {
+        Box::new(DefaultNodeRequestRouter {
             routes: Routes::new(),
-            connection_factory: Arc::new(Mutex::new(ConnectionFactory::new())),
-        }
+            connection_factory:  connection_registry,
+            node_factory
+        })
     }
-
     fn add_node(&mut self, id: u16) {
-        self.routes.insert(id, DefaultMemberNode::new(id, Arc::clone(&self.connection_factory)));
+        self.routes.insert(id,  self.node_factory.create(id,  Arc::clone(&self.connection_factory)));
 
         println!("Node {} has been added", id);
+    }
+}
+
+pub trait NodeFactory<T>
+    where T: MemberNode {
+    fn create(&self, id: u16, connection: Arc<Mutex<dyn ConnectionRegistry>>) -> Arc<Mutex<T>>;
+}
+
+pub struct DefaultNodeFactory;
+
+impl NodeFactory<DefaultMemberNode> for DefaultNodeFactory {
+    fn create(&self, id: u16, connection: Arc<Mutex<dyn ConnectionRegistry>>) -> Arc<Mutex<DefaultMemberNode>> {
+        DefaultMemberNode::new(id, connection)
     }
 }

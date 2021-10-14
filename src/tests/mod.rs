@@ -3,7 +3,7 @@ mod tests {
     mod connection_tests {
         use std::sync::mpsc;
         use std::sync::mpsc::Receiver;
-        use crate::connection::swim_node::ConnectionFactory;
+        use crate::connection::swim_node::{ConnectionFactory, ConnectionRegistry};
         use crate::message::swim_node::Message;
 
         #[test]
@@ -46,7 +46,7 @@ mod tests {
         use std::sync::{Arc, Mutex};
         use std::thread;
         use std::time::Duration;
-        use crate::connection::swim_node::ConnectionFactory;
+        use crate::connection::swim_node::{ConnectionFactory, ConnectionRegistry};
         use crate::member_node::swim_node::{DefaultMemberNode, MemberNodeState};
         use crate::message::swim_node::Message;
 
@@ -71,7 +71,7 @@ mod tests {
             let connection_factory = ConnectionFactory::new();
             let connection_ref = Arc::new(Mutex::new(connection_factory));
             let node1 = DefaultMemberNode::new(1, Arc::clone(&connection_ref));
-            let mut node2 = DefaultMemberNode::new(2, Arc::clone(&connection_ref));
+            let node2 = DefaultMemberNode::new(2, Arc::clone(&connection_ref));
 
             let serialized_details = node1.lock().unwrap().details().serialize();
             connection_ref.lock().unwrap().send_to(2, Message::Request(serialized_details, String::from("hello")));
@@ -85,6 +85,32 @@ mod tests {
             thread::sleep(Duration::from_secs(2));
 
             assert_eq!(MemberNodeState::Failed, *node1.lock().unwrap().details().members().get_state_for(2).unwrap());
+        }
+    }
+
+    mod test_router {
+        use std::sync::{Arc, Mutex};
+        use crate::member_node::swim_node::{DefaultMemberNode, MemberNode, MemberNodeDetails};
+        use mockall::*;
+        use mockall::predicate::*;
+        use crate::connection::swim_node::ConnectionFactory;
+        use crate::network_router::{DefaultNodeRequestRouter, NodeRequestRouter};
+
+        // mock! {
+        //     TestDefaultNodeRequestRouter {}
+        //     impl MemberNode for TestMemberNode {
+        //           fn host(&self) -> u16 { }
+        //           fn serialize_host_details(&self) -> MemberNodeDetails { }
+        //     }
+        // }
+
+        #[test]
+        fn test_mock() {
+            // let mut mock = MockDefaultNodeRequestRouter::default();
+            // mock.expect_create_node().returning(|id, connection| panic!("aaaaa"));
+
+            // MockDefaultNodeRequestRouter::create_node(1, Arc::new(Mutex::new(ConnectionFactory::new())));
+            // let mut router = DefaultNodeRequestRouter::new();
         }
     }
 }

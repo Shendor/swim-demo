@@ -3,6 +3,16 @@ pub mod swim_node {
     use std::sync::mpsc::Sender;
     use crate::message::swim_node::Message;
 
+    pub trait ConnectionRegistry : Send {
+        fn get_connection_for(&self, host: u16) -> Option<&Sender<Message>>;
+
+        fn send_to(&self, host: u16, message: Message);
+
+        fn add_connection(&mut self, host: u16, connection: Sender<Message>);
+
+        fn remove_connection(&mut self, host: u16);
+    }
+
     pub struct ConnectionFactory {
         connection: HashMap<u16, Sender<Message>>,
     }
@@ -13,12 +23,14 @@ pub mod swim_node {
                 connection: HashMap::new()
             }
         }
+    }
 
-        pub fn get_connection_for(&self, host: u16) -> Option<&Sender<Message>> {
+    impl ConnectionRegistry for ConnectionFactory {
+        fn get_connection_for(&self, host: u16) -> Option<&Sender<Message>> {
             self.connection.get(&host)
         }
 
-        pub fn send_to(&self, host: u16, message: Message) {
+        fn send_to(&self, host: u16, message: Message) {
             match self.connection.get(&host) {
                 Some(c) => {
                     c.send(message).unwrap_or_else(|err| println!("Failed to send message from host {} - {:?}", host, err))
@@ -27,11 +39,11 @@ pub mod swim_node {
             }
         }
 
-        pub fn add_connection(&mut self, host: u16, connection: Sender<Message>) {
+        fn add_connection(&mut self, host: u16, connection: Sender<Message>) {
             self.connection.insert(host, connection);
         }
 
-        pub fn remove_connection(&mut self, host: u16) {
+        fn remove_connection(&mut self, host: u16) {
             self.connection.remove(&host);
         }
     }

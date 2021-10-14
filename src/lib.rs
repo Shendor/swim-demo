@@ -4,10 +4,13 @@ pub mod connection;
 pub mod message;
 mod tests;
 
-use crate::network_router::{DefaultNodeRequestRouter, NodeRequestRouter};
+use std::sync::{Arc, Mutex};
+use crate::connection::swim_node::ConnectionFactory;
+use crate::network_router::{DefaultNodeRequestRouter, NodeRequestRouter, DefaultNodeFactory};
 
 pub fn run_network() -> Box<dyn NodeRequestRouter> {
-    let mut router = DefaultNodeRequestRouter::new();
+    let node_factory = DefaultNodeFactory {};
+    let mut router = DefaultNodeRequestRouter::new(Box::new(node_factory), Arc::new(Mutex::new(ConnectionFactory::new())));
     router.start();
-    Box::new(router)
+    router
 }

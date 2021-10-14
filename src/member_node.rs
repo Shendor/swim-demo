@@ -1,5 +1,5 @@
 pub mod swim_node {
-    use crate::connection::swim_node::ConnectionFactory;
+    use crate::connection::swim_node::{ConnectionRegistry};
     use std::{thread};
     use std::collections::{HashMap};
     use std::fmt::{Display, Formatter};
@@ -35,7 +35,7 @@ pub mod swim_node {
     }
 
     impl DefaultMemberNode {
-        pub fn new(host: u16, connection: Arc<Mutex<ConnectionFactory>>) -> Arc<Mutex<DefaultMemberNode>> {
+        pub fn new(host: u16, connection: Arc<Mutex<dyn ConnectionRegistry>>) -> Arc<Mutex<DefaultMemberNode>> {
             let (sender, receiver): (Sender<Message>, Receiver<Message>) = mpsc::channel();
             let connection_ref = Arc::clone(&connection);
             connection.lock().unwrap().add_connection(host, sender);
@@ -163,7 +163,7 @@ pub mod swim_node {
         }
     }
 
-    fn send_to(host: u16, message: Message, connection_factory: &Arc<Mutex<ConnectionFactory>>) {
+    fn send_to(host: u16, message: Message, connection_factory: &Arc<Mutex<dyn ConnectionRegistry>>) {
         connection_factory.lock().unwrap().send_to(host, message);
     }
 
