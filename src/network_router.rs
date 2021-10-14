@@ -13,15 +13,15 @@ pub trait NodeRequestRouter {
     fn shut_down(&self);
 }
 
-type Routes = HashMap<u16, Arc<Mutex<dyn MemberNode>>>;
+type Routes<T> = HashMap<u16, Arc<Mutex<T>>>;
 
-pub struct DefaultNodeRequestRouter {
-    routes: Routes,
+pub struct DefaultNodeRequestRouter<T> where T : MemberNode {
+    routes: Routes<T>,
     connection_factory: Arc<Mutex<dyn ConnectionRegistry>>,
-    node_factory: Box<dyn NodeFactory<DefaultMemberNode>>
+    node_factory: Box<dyn NodeFactory<T>>,
 }
 
-impl NodeRequestRouter for DefaultNodeRequestRouter {
+impl <T> NodeRequestRouter for DefaultNodeRequestRouter<T> where T : MemberNode {
     fn start(&mut self) {
         if self.routes.is_empty() {
             self.add_node(1)
@@ -43,31 +43,32 @@ impl NodeRequestRouter for DefaultNodeRequestRouter {
     }
 }
 
-impl DefaultNodeRequestRouter {
-    pub fn new(node_factory : Box<dyn NodeFactory<DefaultMemberNode>>,
-               connection_registry : Arc<Mutex<dyn ConnectionRegistry>>) -> Box<DefaultNodeRequestRouter> {
+impl <T> DefaultNodeRequestRouter<T> where T : MemberNode {
+    pub fn new(node_factory: Box<dyn NodeFactory<T>>,
+                  connection_registry: Arc<Mutex<dyn ConnectionRegistry + Send>>) -> Box<DefaultNodeRequestRouter<T>> {
         Box::new(DefaultNodeRequestRouter {
-            routes: Routes::new(),
-            connection_factory:  connection_registry,
-            node_factory
+            routes: Routes::<T>::new(),
+            connection_factory: connection_registry,
+            node_factory,
         })
     }
-    fn add_node(&mut self, id: u16) {
-        self.routes.insert(id,  self.node_factory.create(id,  Arc::clone(&self.connection_factory)));
 
-        println!("Node {} has been added", id);
+    fn add_node(&mut self, host: u16) {
+        self.routes.insert(host, self.node_factory.create(host, Arc::clone(&self.connection_factory)));
+
+        println!("Node {} has been added", host);
     }
 }
 
 pub trait NodeFactory<T>
     where T: MemberNode {
-    fn create(&self, id: u16, connection: Arc<Mutex<dyn ConnectionRegistry>>) -> Arc<Mutex<T>>;
+    fn create(&self, host: u16, connection: Arc<Mutex<dyn ConnectionRegistry>>) -> Arc<Mutex<T>>;
 }
 
 pub struct DefaultNodeFactory;
 
 impl NodeFactory<DefaultMemberNode> for DefaultNodeFactory {
-    fn create(&self, id: u16, connection: Arc<Mutex<dyn ConnectionRegistry>>) -> Arc<Mutex<DefaultMemberNode>> {
-        DefaultMemberNode::new(id, connection)
+    fn create(&self, host: u16, connection: Arc<Mutex<dyn ConnectionRegistry>>) -> Arc<Mutex<DefaultMemberNode>> {
+        DefaultMemberNode::new(host, connection)
     }
 }

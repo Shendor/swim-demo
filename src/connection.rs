@@ -3,8 +3,7 @@ pub mod swim_node {
     use std::sync::mpsc::Sender;
     use crate::message::swim_node::Message;
 
-    pub trait ConnectionRegistry : Send {
-        fn get_connection_for(&self, host: u16) -> Option<&Sender<Message>>;
+    pub trait ConnectionRegistry: Send {
 
         fn send_to(&self, host: u16, message: Message);
 
@@ -23,13 +22,13 @@ pub mod swim_node {
                 connection: HashMap::new()
             }
         }
+
+        pub fn get_connection_for(&self, host: u16) -> Option<&Sender<Message>> {
+            self.connection.get(&host)
+        }
     }
 
     impl ConnectionRegistry for ConnectionFactory {
-        fn get_connection_for(&self, host: u16) -> Option<&Sender<Message>> {
-            self.connection.get(&host)
-        }
-
         fn send_to(&self, host: u16, message: Message) {
             match self.connection.get(&host) {
                 Some(c) => {

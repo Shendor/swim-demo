@@ -10,7 +10,7 @@ use crate::network_router::{DefaultNodeRequestRouter, NodeRequestRouter, Default
 
 pub fn run_network() -> Box<dyn NodeRequestRouter> {
     let node_factory = DefaultNodeFactory {};
-    let mut router = DefaultNodeRequestRouter::new(Box::new(node_factory), Arc::new(Mutex::new(ConnectionFactory::new())));
+    let mut router = DefaultNodeRequestRouter::new(Box::<DefaultNodeFactory>::new(node_factory), Arc::new(Mutex::new(ConnectionFactory::new())));
     router.start();
     router
 }
