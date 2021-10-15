@@ -123,7 +123,7 @@ mod tests {
         }
 
         #[test]
-        fn test_mock() {
+        fn test_router_send_between_nodes() {
             let mut node1 = MockTestMemberNode::new();
             node1.expect_host().returning(|| 1);
             node1.expect_serialize_host_details()
