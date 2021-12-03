@@ -27,11 +27,11 @@ jobs:
       run: cargo build --verbose
 
     - name: Run tests
-      if: ${{ env.PUSH_PACKAGES == 'true' }}
+      if: ${{ success() && env.PUSH_PACKAGES == 'true' }}
       run: cargo test --verbose
 
     - name: Check toolchain
-      if: ${{ env.PUSH_PACKAGES == 'true' }}
+      if: ${{ success() && env.PUSH_PACKAGES == 'true' }}
       run: rustup show
 
 #    - uses: katyo/publish-crates@v1
