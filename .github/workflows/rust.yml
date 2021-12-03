@@ -4,10 +4,11 @@ on:
   push:
     branches: [ master ]
   pull_request:
-    branches: [ master ]
+    branches: [ '**' ]
 
 env:
   CARGO_TERM_COLOR: always
+  PUSH_PACKAGES: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
 
 jobs:
   build:
@@ -26,8 +27,13 @@ jobs:
       run: cargo build --verbose
 
     - name: Run tests
+      if: ${{ env.PUSH_PACKAGES }}
       run: cargo test --verbose
 
-    - uses: katyo/publish-crates@v1
-      with:
-        registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    - name: Check toolchain
+      if: ${{ env.PUSH_PACKAGES }}
+      run: rustup show
+
+#    - uses: katyo/publish-crates@v1
+#      with:
+#        registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
