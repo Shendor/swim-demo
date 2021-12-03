@@ -8,7 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  PUSH_PACKAGES: github.event_name == 'push'
+  PUSH_PACKAGES: github.event_name == 'push' && github.ref == 'refs/heads/master'
 
 jobs:
   build:
@@ -27,11 +27,11 @@ jobs:
       run: cargo build --verbose
 
     - name: Run tests
-      if: ${{ env.PUSH_PACKAGES }} == 'true'
+      if: ${{ env.PUSH_PACKAGES }}
       run: cargo test --verbose
 
     - name: Check toolchain
-      if: success() && ${{ env.PUSH_PACKAGES }} == 'true'
+      if: success() && ${{ env.PUSH_PACKAGES }}
       run: rustup show
 
 #    - uses: katyo/publish-crates@v1
